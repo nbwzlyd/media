@@ -367,13 +367,17 @@ public final class TsExtractor implements Extractor {
     byte[] buffer = tsPacketBuffer.getData();
     input.peekFully(buffer, 0, TS_PACKET_SIZE * SNIFF_TS_PACKET_COUNT);
     int of = 0;
-    for (int i = 0; i < TS_PACKET_SIZE * SNIFF_TS_PACKET_COUNT; i++) {
-      if (buffer[i] == TS_SYNC_BYTE && buffer[i + 1] == 0x40) {
-        if (i > 0) input.skipFully(i);
-        of = i;
-        break;
+      try {
+          for (int i = 0; i < TS_PACKET_SIZE * SNIFF_TS_PACKET_COUNT; i++) {
+              if (buffer[i] == TS_SYNC_BYTE && buffer[i + 1] == 0x40) {
+                  if (i > 0) input.skipFully(i);
+                  of = i;
+                  break;
+              }
+          }
+      } catch (Exception e) {
+
       }
-    }
     input.peekFully(buffer, of, TS_PACKET_SIZE * SNIFF_TS_PACKET_COUNT);
     for (int startPosCandidate = 0; startPosCandidate < TS_PACKET_SIZE; startPosCandidate++) {
       // Try to identify at least SNIFF_TS_PACKET_COUNT packets starting with TS_SYNC_BYTE.
