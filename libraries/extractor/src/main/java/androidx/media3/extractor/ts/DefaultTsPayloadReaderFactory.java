@@ -173,7 +173,7 @@ public final class DefaultTsPayloadReaderFactory implements TsPayloadReader.Fact
       case TsExtractor.TS_STREAM_TYPE_DTS:
       case TsExtractor.TS_STREAM_TYPE_DTS_HD:
         return new PesReader(
-            new DtsReader(esInfo.language, esInfo.getRoleFlags(), DtsReader.EXTSS_HEADER_SIZE_MAX));
+                new DtsReader(esInfo.language, esInfo.getRoleFlags(), DtsReader.EXTSS_HEADER_SIZE_MAX));
       case TsExtractor.TS_STREAM_TYPE_DTS_UHD:
         return new PesReader(
             new DtsReader(esInfo.language, esInfo.getRoleFlags(), DtsReader.FTOC_MAX_HEADER_SIZE));
@@ -204,6 +204,8 @@ public final class DefaultTsPayloadReaderFactory implements TsPayloadReader.Fact
         return new SectionReader(new PassthroughSectionPayloadReader(MimeTypes.APPLICATION_AIT));
       case TsExtractor.TS_STREAM_TYPE_MHAS:
         return new PesReader(new MpeghReader());
+      case TsExtractor.TS_STREAM_TYPE_AV3A:
+        return new PesReader(new Av3aReader(esInfo.language, esInfo.getRoleFlags()));
       default:
         return null;
     }
