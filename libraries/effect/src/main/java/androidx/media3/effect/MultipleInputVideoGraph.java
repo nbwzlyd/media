@@ -17,15 +17,17 @@
 package androidx.media3.effect;
 
 import static androidx.media3.common.VideoFrameProcessor.INPUT_TYPE_TEXTURE_ID;
+import static androidx.media3.common.util.Assertions.checkArgument;
 import static androidx.media3.common.util.Assertions.checkNotNull;
 import static androidx.media3.common.util.Assertions.checkState;
 import static androidx.media3.common.util.Assertions.checkStateNotNull;
+import static androidx.media3.common.util.GlUtil.destroyEglContext;
+import static androidx.media3.common.util.GlUtil.getDefaultEglDisplay;
 import static androidx.media3.common.util.Util.contains;
 import static androidx.media3.common.util.Util.newSingleThreadScheduledExecutor;
 import static androidx.media3.effect.DebugTraceUtil.COMPONENT_COMPOSITOR;
 import static androidx.media3.effect.DebugTraceUtil.COMPONENT_VFP;
 import static androidx.media3.effect.DebugTraceUtil.EVENT_OUTPUT_TEXTURE_RENDERED;
-import static androidx.media3.effect.DefaultVideoFrameProcessor.WORKING_COLOR_SPACE_LINEAR;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 import android.content.Context;
@@ -47,6 +49,8 @@ import androidx.media3.common.VideoFrameProcessingException;
 import androidx.media3.common.VideoFrameProcessor;
 import androidx.media3.common.VideoGraph;
 import androidx.media3.common.util.GlUtil;
+import androidx.media3.common.util.GlUtil.GlException;
+import androidx.media3.common.util.Log;
 import androidx.media3.common.util.UnstableApi;
 import com.google.common.util.concurrent.MoreExecutors;
 import java.util.ArrayDeque;
@@ -61,6 +65,7 @@ import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
 @UnstableApi
 public abstract class MultipleInputVideoGraph implements VideoGraph {
 
+  private static final String TAG = "MultiInputVG";
   private static final String SHARED_EXECUTOR_NAME = "Effect:MultipleInputVideoGraph:Thread";
 
   private static final long RELEASE_WAIT_TIME_MS = 1_000;
@@ -70,7 +75,7 @@ public abstract class MultipleInputVideoGraph implements VideoGraph {
   private final Context context;
 
   private final ColorInfo outputColorInfo;
-  private final GlObjectsProvider glObjectsProvider;
+  private final SingleContextGlObjectsProvider glObjectsProvider;
   private final DebugViewProvider debugViewProvider;
   private final VideoGraph.Listener listener;
   private final Executor listenerExecutor;
@@ -85,6 +90,7 @@ public abstract class MultipleInputVideoGraph implements VideoGraph {
   private final SparseArray<CompositorOutputTextureRelease> compositorOutputTextureReleases;
 
   private final long initialTimestampOffsetUs;
+  private final boolean renderFramesAutomatically;
 
   @Nullable private VideoFrameProcessor compositionVideoFrameProcessor;
   @Nullable private VideoCompositor videoCompositor;
@@ -99,13 +105,16 @@ public abstract class MultipleInputVideoGraph implements VideoGraph {
 
   protected MultipleInputVideoGraph(
       Context context,
+      VideoFrameProcessor.Factory videoFrameProcessorFactory,
       ColorInfo outputColorInfo,
       DebugViewProvider debugViewProvider,
       Listener listener,
       Executor listenerExecutor,
       VideoCompositorSettings videoCompositorSettings,
       List<Effect> compositionEffects,
-      long initialTimestampOffsetUs) {
+      long initialTimestampOffsetUs,
+      boolean renderFramesAutomatically) {
+    checkArgument(videoFrameProcessorFactory instanceof DefaultVideoFrameProcessor.Factory);
     this.context = context;
     this.outputColorInfo = outputColorInfo;
     this.debugViewProvider = debugViewProvider;
@@ -114,14 +123,15 @@ public abstract class MultipleInputVideoGraph implements VideoGraph {
     this.videoCompositorSettings = videoCompositorSettings;
     this.compositionEffects = new ArrayList<>(compositionEffects);
     this.initialTimestampOffsetUs = initialTimestampOffsetUs;
+    this.renderFramesAutomatically = renderFramesAutomatically;
     lastRenderedPresentationTimeUs = C.TIME_UNSET;
     preProcessors = new SparseArray<>();
     sharedExecutorService = newSingleThreadScheduledExecutor(SHARED_EXECUTOR_NAME);
     glObjectsProvider = new SingleContextGlObjectsProvider();
-    // TODO - b/289986435: Support injecting VideoFrameProcessor.Factory.
-    videoFrameProcessorFactory =
-        new DefaultVideoFrameProcessor.Factory.Builder()
-            .setSdrWorkingColorSpace(WORKING_COLOR_SPACE_LINEAR)
+    // TODO - b/289986435: Support injecting arbitrary VideoFrameProcessor.Factory.
+    this.videoFrameProcessorFactory =
+        ((DefaultVideoFrameProcessor.Factory) videoFrameProcessorFactory)
+            .buildUpon()
             .setGlObjectsProvider(glObjectsProvider)
             .setExecutorService(sharedExecutorService)
             .build();
@@ -148,7 +158,7 @@ public abstract class MultipleInputVideoGraph implements VideoGraph {
             context,
             debugViewProvider,
             outputColorInfo,
-            /* renderFramesAutomatically= */ true,
+            renderFramesAutomatically,
             /* listenerExecutor= */ MoreExecutors.directExecutor(),
             new VideoFrameProcessor.Listener() {
               // All of this listener's methods are called on the sharedExecutorService.
@@ -172,6 +182,9 @@ public abstract class MultipleInputVideoGraph implements VideoGraph {
                   hasProducedFrameWithTimestampZero = true;
                 }
                 lastRenderedPresentationTimeUs = presentationTimeUs;
+
+                listenerExecutor.execute(
+                    () -> listener.onOutputFrameAvailableForRendering(presentationTimeUs));
               }
 
               @Override
@@ -299,6 +312,15 @@ public abstract class MultipleInputVideoGraph implements VideoGraph {
       compositionVideoFrameProcessor = null;
     }
 
+    try {
+      // The eglContext is not released by any of the frame processors.
+      if (glObjectsProvider.singleEglContext != null) {
+        destroyEglContext(getDefaultEglDisplay(), glObjectsProvider.singleEglContext);
+      }
+    } catch (GlUtil.GlException e) {
+      Log.e(TAG, "Error releasing GL context", e);
+    }
+
     sharedExecutorService.shutdown();
     try {
       sharedExecutorService.awaitTermination(RELEASE_WAIT_TIME_MS, MILLISECONDS);
@@ -308,6 +330,10 @@ public abstract class MultipleInputVideoGraph implements VideoGraph {
     }
 
     released = true;
+  }
+
+  protected VideoFrameProcessor getCompositionVideoFrameProcessor() {
+    return checkStateNotNull(compositionVideoFrameProcessor);
   }
 
   protected long getInitialTimestampOffsetUs() {
@@ -460,8 +486,7 @@ public abstract class MultipleInputVideoGraph implements VideoGraph {
 
     @Override
     public EGLContext createEglContext(
-        EGLDisplay eglDisplay, int openGlVersion, int[] configAttributes)
-        throws GlUtil.GlException {
+        EGLDisplay eglDisplay, int openGlVersion, int[] configAttributes) throws GlException {
       if (singleEglContext == null) {
         singleEglContext =
             glObjectsProvider.createEglContext(eglDisplay, openGlVersion, configAttributes);
@@ -475,21 +500,26 @@ public abstract class MultipleInputVideoGraph implements VideoGraph {
         Object surface,
         @C.ColorTransfer int colorTransfer,
         boolean isEncoderInputSurface)
-        throws GlUtil.GlException {
+        throws GlException {
       return glObjectsProvider.createEglSurface(
           eglDisplay, surface, colorTransfer, isEncoderInputSurface);
     }
 
     @Override
     public EGLSurface createFocusedPlaceholderEglSurface(
-        EGLContext eglContext, EGLDisplay eglDisplay) throws GlUtil.GlException {
+        EGLContext eglContext, EGLDisplay eglDisplay) throws GlException {
       return glObjectsProvider.createFocusedPlaceholderEglSurface(eglContext, eglDisplay);
     }
 
     @Override
     public GlTextureInfo createBuffersForTexture(int texId, int width, int height)
-        throws GlUtil.GlException {
+        throws GlException {
       return glObjectsProvider.createBuffersForTexture(texId, width, height);
+    }
+
+    @Override
+    public void release(EGLDisplay eglDisplay) {
+      // The eglContext is released in the VideoGraph after all VideoFrameProcessors are released.
     }
   }
 }

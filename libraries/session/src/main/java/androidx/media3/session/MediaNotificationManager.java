@@ -26,7 +26,6 @@ import android.content.pm.ServiceInfo;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import androidx.annotation.DoNotInline;
 import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
 import androidx.core.app.NotificationManagerCompat;
@@ -210,14 +209,11 @@ import java.util.concurrent.TimeoutException;
       MediaSession session,
       MediaNotification mediaNotification,
       boolean startInForegroundRequired) {
-    if (Util.SDK_INT >= 21) {
-      // Call Notification.MediaStyle#setMediaSession() indirectly.
-      android.media.session.MediaSession.Token fwkToken =
-          (android.media.session.MediaSession.Token)
-              session.getSessionCompat().getSessionToken().getToken();
-      mediaNotification.notification.extras.putParcelable(
-          Notification.EXTRA_MEDIA_SESSION, fwkToken);
-    }
+    // Call Notification.MediaStyle#setMediaSession() indirectly.
+    android.media.session.MediaSession.Token fwkToken =
+        (android.media.session.MediaSession.Token)
+            session.getSessionCompat().getSessionToken().getToken();
+    mediaNotification.notification.extras.putParcelable(Notification.EXTRA_MEDIA_SESSION, fwkToken);
     this.mediaNotification = mediaNotification;
     if (startInForegroundRequired) {
       startForeground(mediaNotification);
@@ -379,9 +375,7 @@ import java.util.concurrent.TimeoutException;
     if (Util.SDK_INT >= 24) {
       Api24.stopForeground(mediaSessionService, removeNotifications);
     } else {
-      // For pre-L devices, we must call Service.stopForeground(true) anyway as a workaround
-      // that prevents the media notification from being undismissable.
-      mediaSessionService.stopForeground(removeNotifications || Util.SDK_INT < 21);
+      mediaSessionService.stopForeground(removeNotifications);
     }
     startedInForeground = false;
   }
@@ -389,7 +383,6 @@ import java.util.concurrent.TimeoutException;
   @RequiresApi(24)
   private static class Api24 {
 
-    @DoNotInline
     public static void stopForeground(MediaSessionService service, boolean removeNotification) {
       service.stopForeground(removeNotification ? STOP_FOREGROUND_REMOVE : STOP_FOREGROUND_DETACH);
     }

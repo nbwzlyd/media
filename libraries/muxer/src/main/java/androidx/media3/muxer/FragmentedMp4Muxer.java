@@ -35,7 +35,27 @@ import java.nio.ByteBuffer;
 /**
  * A muxer for creating a fragmented MP4 file.
  *
- * <p>The muxer supports writing H264, H265 and AV1 video, AAC audio and metadata.
+ * <p>Muxer supports muxing of:
+ *
+ * <ul>
+ *   <li>Video Codecs:
+ *       <ul>
+ *         <li>AV1
+ *         <li>MPEG-4
+ *         <li>H.263
+ *         <li>H.264 (AVC)
+ *         <li>H.265 (HEVC)
+ *       </ul>
+ *   <li>Audio Codecs:
+ *       <ul>
+ *         <li>AAC
+ *         <li>AMR-NB (Narrowband AMR)
+ *         <li>AMR-WB (Wideband AMR)
+ *         <li>Opus
+ *         <li>Vorbis
+ *       </ul>
+ *   <li>Metadata
+ * </ul>
  *
  * <p>All the operations are performed on the caller thread.
  *
@@ -124,13 +144,10 @@ public final class FragmentedMp4Muxer implements Muxer {
       FileOutputStream fileOutputStream, long fragmentDurationMs, boolean sampleCopyEnabled) {
     checkNotNull(fileOutputStream);
     metadataCollector = new MetadataCollector();
-    Mp4MoovStructure moovStructure =
-        new Mp4MoovStructure(
-            metadataCollector, Mp4Muxer.LAST_FRAME_DURATION_BEHAVIOR_DUPLICATE_PREV_DURATION);
     fragmentedMp4Writer =
         new FragmentedMp4Writer(
             fileOutputStream,
-            moovStructure,
+            metadataCollector,
             AnnexBToAvccConverter.DEFAULT,
             fragmentDurationMs,
             sampleCopyEnabled);
@@ -194,7 +211,7 @@ public final class FragmentedMp4Muxer implements Muxer {
    */
   @Override
   public void addMetadataEntry(Metadata.Entry metadataEntry) {
-    checkArgument(Mp4Utils.isMetadataSupported(metadataEntry), "Unsupported metadata");
+    checkArgument(MuxerUtil.isMetadataSupported(metadataEntry), "Unsupported metadata");
     metadataCollector.addMetadata(metadataEntry);
   }
 

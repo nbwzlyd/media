@@ -19,6 +19,7 @@ package androidx.media3.transformer;
 import static androidx.media3.common.util.Assertions.checkArgument;
 import static androidx.media3.common.util.Assertions.checkNotNull;
 import static androidx.media3.common.util.Assertions.checkState;
+import static androidx.media3.common.util.Util.isRunningOnEmulator;
 import static androidx.media3.extractor.AacUtil.AAC_LC_AUDIO_SAMPLE_COUNT;
 import static androidx.media3.transformer.ExportException.ERROR_CODE_MUXING_APPEND;
 import static androidx.media3.transformer.ExportResult.OPTIMIZATION_ABANDONED_KEYFRAME_PLACEMENT_OPTIMAL_FOR_TRIM;
@@ -47,9 +48,8 @@ import androidx.media3.common.MediaLibraryInfo;
 import androidx.media3.common.MimeTypes;
 import androidx.media3.common.VideoFrameProcessor;
 import androidx.media3.common.audio.AudioProcessor;
-import androidx.media3.common.audio.AudioProcessor.AudioFormat;
 import androidx.media3.common.audio.ChannelMixingAudioProcessor;
-import androidx.media3.common.audio.SonicAudioProcessor;
+import androidx.media3.common.audio.ToInt16PcmAudioProcessor;
 import androidx.media3.common.util.Clock;
 import androidx.media3.common.util.HandlerWrapper;
 import androidx.media3.common.util.ListenerSet;
@@ -57,7 +57,6 @@ import androidx.media3.common.util.UnstableApi;
 import androidx.media3.common.util.Util;
 import androidx.media3.effect.DebugTraceUtil;
 import androidx.media3.effect.DefaultVideoFrameProcessor;
-import androidx.media3.effect.Presentation;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.muxer.Muxer;
 import com.google.common.collect.ImmutableList;
@@ -114,6 +113,7 @@ public final class Transformer {
     private boolean trimOptimizationEnabled;
     private boolean fileStartsOnVideoFrameEnabled;
     private long maxDelayBetweenMuxerSamplesMs;
+    private int maxFramesInEncoder;
     private ListenerSet<Transformer.Listener> listeners;
     private AssetLoader.@MonotonicNonNull Factory assetLoaderFactory;
     private AudioMixer.Factory audioMixerFactory;
@@ -132,6 +132,7 @@ public final class Transformer {
     public Builder(Context context) {
       this.context = context.getApplicationContext();
       maxDelayBetweenMuxerSamplesMs = DEFAULT_MAX_DELAY_BETWEEN_MUXER_SAMPLES_MS;
+      maxFramesInEncoder = C.INDEX_UNSET;
       audioProcessors = ImmutableList.of();
       videoEffects = ImmutableList.of();
       audioMixerFactory = new DefaultAudioMixer.Factory();
@@ -157,6 +158,7 @@ public final class Transformer {
       this.trimOptimizationEnabled = transformer.trimOptimizationEnabled;
       this.fileStartsOnVideoFrameEnabled = transformer.fileStartsOnVideoFrameEnabled;
       this.maxDelayBetweenMuxerSamplesMs = transformer.maxDelayBetweenMuxerSamplesMs;
+      this.maxFramesInEncoder = transformer.maxFramesInEncoder;
       this.listeners = transformer.listeners;
       this.assetLoaderFactory = transformer.assetLoaderFactory;
       this.audioMixerFactory = transformer.audioMixerFactory;
@@ -333,6 +335,30 @@ public final class Transformer {
     }
 
     /**
+     * Limits how many video frames can be processed at any time by the {@linkplain Codec encoder}.
+     *
+     * <p>A video frame starts encoding when it enters the {@linkplain Codec#getInputSurface()
+     * encoder input surface}, and finishes encoding when the corresponding {@linkplain
+     * Codec#releaseOutputBuffer encoder output buffer is released}.
+     *
+     * <p>The default value is {@link C#INDEX_UNSET}, which means no limit is enforced.
+     *
+     * <p>This method is experimental and will be renamed or removed in a future release.
+     *
+     * @param maxFramesInEncoder The maximum number of frames that the video encoder is allowed to
+     *     process at a time, or {@link C#INDEX_UNSET} if no limit is enforced.
+     * @return This builder.
+     * @throws IllegalArgumentException If {@code maxFramesInEncoder} is not equal to {@link
+     *     C#INDEX_UNSET} and is non-positive.
+     */
+    @CanIgnoreReturnValue
+    public Builder experimentalSetMaxFramesInEncoder(int maxFramesInEncoder) {
+      checkArgument(maxFramesInEncoder > 0 || maxFramesInEncoder == C.INDEX_UNSET);
+      this.maxFramesInEncoder = maxFramesInEncoder;
+      return this;
+    }
+
+    /**
      * Sets whether to ensure that the output file starts on a video frame.
      *
      * <p>Any audio samples that are earlier than the first video frame will be dropped. This can
@@ -462,6 +488,10 @@ public final class Transformer {
      * <p>If passing in a {@link DefaultVideoFrameProcessor.Factory}, the caller must not {@link
      * DefaultVideoFrameProcessor.Factory.Builder#setTextureOutput set the texture output}.
      *
+     * <p>If exporting a {@link Composition} with multiple video {@linkplain EditedMediaItemSequence
+     * sequences}, the {@link VideoFrameProcessor.Factory} must be a {@link
+     * DefaultVideoFrameProcessor.Factory}.
+     *
      * @param videoFrameProcessorFactory A {@link VideoFrameProcessor.Factory}.
      * @return This builder.
      */
@@ -587,6 +617,7 @@ public final class Transformer {
           trimOptimizationEnabled,
           fileStartsOnVideoFrameEnabled,
           maxDelayBetweenMuxerSamplesMs,
+          maxFramesInEncoder,
           listeners,
           assetLoaderFactory,
           audioMixerFactory,
@@ -757,7 +788,8 @@ public final class Transformer {
    * The default value for the {@linkplain Builder#setMaxDelayBetweenMuxerSamplesMs maximum delay
    * between output samples}.
    */
-  public static final long DEFAULT_MAX_DELAY_BETWEEN_MUXER_SAMPLES_MS = 10_000;
+  public static final long DEFAULT_MAX_DELAY_BETWEEN_MUXER_SAMPLES_MS =
+      isRunningOnEmulator() ? 21_000 : 10_000;
 
   @Documented
   @Retention(RetentionPolicy.SOURCE)
@@ -838,6 +870,7 @@ public final class Transformer {
   private final boolean trimOptimizationEnabled;
   private final boolean fileStartsOnVideoFrameEnabled;
   private final long maxDelayBetweenMuxerSamplesMs;
+  private final int maxFramesInEncoder;
 
   private final ListenerSet<Transformer.Listener> listeners;
   @Nullable private final AssetLoader.Factory assetLoaderFactory;
@@ -875,6 +908,7 @@ public final class Transformer {
       boolean trimOptimizationEnabled,
       boolean fileStartsOnVideoFrameEnabled,
       long maxDelayBetweenMuxerSamplesMs,
+      int maxFramesInEncoder,
       ListenerSet<Listener> listeners,
       @Nullable AssetLoader.Factory assetLoaderFactory,
       AudioMixer.Factory audioMixerFactory,
@@ -895,6 +929,7 @@ public final class Transformer {
     this.trimOptimizationEnabled = trimOptimizationEnabled;
     this.fileStartsOnVideoFrameEnabled = fileStartsOnVideoFrameEnabled;
     this.maxDelayBetweenMuxerSamplesMs = maxDelayBetweenMuxerSamplesMs;
+    this.maxFramesInEncoder = maxFramesInEncoder;
     this.listeners = listeners;
     this.assetLoaderFactory = assetLoaderFactory;
     this.audioMixerFactory = audioMixerFactory;
@@ -981,28 +1016,23 @@ public final class Transformer {
    * EditedMediaItemSequence}, while the audio format will be determined by the {@code
    * AudioMediaItem} in the second {@code EditedMediaItemSequence}.
    *
-   * <p>This method is under development. A {@link Composition} must meet the following conditions:
-   *
-   * <ul>
-   *   <li>The video composition {@link Presentation} effect is applied after input streams are
-   *       composited. Other composition effects are ignored.
-   * </ul>
-   *
-   * <p>{@linkplain EditedMediaItemSequence Sequences} within the {@link Composition} must meet the
+   * <p>Some {@linkplain Composition compositions} are not supported yet. More specifically,
+   * {@linkplain EditedMediaItemSequence Sequences} within the {@link Composition} must meet the
    * following conditions:
    *
    * <ul>
-   *   <li>A sequence cannot contain both HDR and SDR video input.
    *   <li>If an {@link EditedMediaItem} in a sequence contains data of a given {@linkplain
    *       C.TrackType track}, so must all items in that sequence.
    *       <ul>
    *         <li>For audio, this condition can be removed by setting an experimental {@link
    *             Composition.Builder#experimentalSetForceAudioTrack(boolean) flag}.
    *       </ul>
-   *   <li>All sequences containing audio data must output audio with the same {@linkplain
-   *       AudioFormat properties}. This can be done by adding {@linkplain EditedMediaItem#effects
-   *       item specific effects}, such as {@link SonicAudioProcessor} and {@link
-   *       ChannelMixingAudioProcessor}.
+   *   <li>If a sequence starts with an HDR {@link EditedMediaItem}, all the following items in the
+   *       sequence must be HDR.
+   *   <li>All {@linkplain EditedMediaItem items} containing audio data must output 16 bit PCM audio
+   *       with the same number of channels. This can be done by adding a {@link
+   *       ToInt16PcmAudioProcessor} and/or a {@link ChannelMixingAudioProcessor} to the {@linkplain
+   *       EditedMediaItem#effects item specific effects}.
    * </ul>
    *
    * <p>The export state is notified through the {@linkplain Builder#addListener(Listener)
@@ -1075,7 +1105,10 @@ public final class Transformer {
    * @throws IllegalStateException If an export is already in progress.
    */
   public void start(EditedMediaItem editedMediaItem, String path) {
-    start(new Composition.Builder(new EditedMediaItemSequence(editedMediaItem)).build(), path);
+    start(
+        new Composition.Builder(new EditedMediaItemSequence.Builder(editedMediaItem).build())
+            .build(),
+        path);
   }
 
   /**
@@ -1464,7 +1497,8 @@ public final class Transformer {
                       AAC_LC_AUDIO_SAMPLE_COUNT, mp4Info.audioFormat.sampleRate);
             }
             if (mp4Info.firstSyncSampleTimestampUsAfterTimeUs - trimStartTimeUs
-                <= maxEncodedAudioBufferDurationUs) {
+                    <= maxEncodedAudioBufferDurationUs
+                || mp4Info.isFirstVideoSampleAfterTimeUsSyncSample) {
               Transformer.this.composition =
                   buildUponCompositionForTrimOptimization(
                       composition,
@@ -1604,6 +1638,7 @@ public final class Transformer {
             audioMixerFactory,
             videoFrameProcessorFactory,
             encoderFactory,
+            maxFramesInEncoder,
             muxerWrapper,
             componentListener,
             fallbackListener,

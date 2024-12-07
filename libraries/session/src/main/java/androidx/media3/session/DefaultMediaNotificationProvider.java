@@ -32,7 +32,6 @@ import android.app.NotificationManager;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.os.Bundle;
-import androidx.annotation.DoNotInline;
 import androidx.annotation.DrawableRes;
 import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
@@ -366,12 +365,6 @@ public class DefaultMediaNotificationProvider implements MediaNotification.Provi
       }
     }
 
-    if (player.isCommandAvailable(COMMAND_STOP) || Util.SDK_INT < 21) {
-      // We must include a cancel intent for pre-L devices.
-      mediaStyle.setCancelButtonIntent(
-          actionFactory.createMediaActionPendingIntent(mediaSession, COMMAND_STOP));
-    }
-
     long playbackStartTimeMs = getPlaybackStartTimeEpochMs(player);
     boolean displayElapsedTimeWithChronometer = playbackStartTimeMs != C.TIME_UNSET;
     builder
@@ -639,9 +632,7 @@ public class DefaultMediaNotificationProvider implements MediaNotification.Provi
   }
 
   private static long getPlaybackStartTimeEpochMs(Player player) {
-    // Changing "showWhen" causes notification flicker if SDK_INT < 21.
-    if (Util.SDK_INT >= 21
-        && player.isPlaying()
+    if (player.isPlaying()
         && !player.isPlayingAd()
         && !player.isCurrentMediaItemDynamic()
         && player.getPlaybackParameters().speed == 1f) {
@@ -690,7 +681,6 @@ public class DefaultMediaNotificationProvider implements MediaNotification.Provi
 
   @RequiresApi(26)
   private static class Api26 {
-    @DoNotInline
     public static void createNotificationChannel(
         NotificationManager notificationManager, String channelId, String channelName) {
       NotificationChannel channel =
@@ -707,7 +697,6 @@ public class DefaultMediaNotificationProvider implements MediaNotification.Provi
 
   @RequiresApi(31)
   private static class Api31 {
-    @DoNotInline
     public static void setForegroundServiceBehavior(NotificationCompat.Builder builder) {
       builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE);
     }

@@ -45,6 +45,7 @@ public final class MimeTypes {
   public static final String VIDEO_H263 = BASE_TYPE_VIDEO + "/3gpp";
   public static final String VIDEO_H264 = BASE_TYPE_VIDEO + "/avc";
   public static final String VIDEO_H265 = BASE_TYPE_VIDEO + "/hevc";
+  public static final String VIDEO_ProRes = BASE_TYPE_VIDEO + "/prores";
   @UnstableApi public static final String VIDEO_VP8 = BASE_TYPE_VIDEO + "/x-vnd.on2.vp8";
   @UnstableApi public static final String VIDEO_VP9 = BASE_TYPE_VIDEO + "/x-vnd.on2.vp9";
   public static final String VIDEO_AV1 = BASE_TYPE_VIDEO + "/av01";
@@ -62,6 +63,7 @@ public final class MimeTypes {
   public static final String VIDEO_MJPEG = BASE_TYPE_VIDEO + "/mjpeg";
   public static final String VIDEO_MP42 = BASE_TYPE_VIDEO + "/mp42";
   public static final String VIDEO_MP43 = BASE_TYPE_VIDEO + "/mp43";
+  @UnstableApi public static final String VIDEO_MV_HEVC = BASE_TYPE_VIDEO + "/mv-hevc";
   @UnstableApi public static final String VIDEO_RAW = BASE_TYPE_VIDEO + "/raw";
   @UnstableApi public static final String VIDEO_UNKNOWN = BASE_TYPE_VIDEO + "/x-unknown";
 
@@ -99,7 +101,8 @@ public final class MimeTypes {
   public static final String AUDIO_OGG = BASE_TYPE_AUDIO + "/ogg";
   public static final String AUDIO_WAV = BASE_TYPE_AUDIO + "/wav";
   public static final String AUDIO_MIDI = BASE_TYPE_AUDIO + "/midi";
-  public static final String AUDIO_AV3A = BASE_TYPE_AUDIO + "/av3a";
+  @UnstableApi public static final String AUDIO_IAMF = BASE_TYPE_AUDIO + "/iamf";
+  @UnstableApi public static final String AUDIO_AV3A = BASE_TYPE_AUDIO + "/av3a";
 
   @UnstableApi
   public static final String AUDIO_EXOPLAYER_MIDI = BASE_TYPE_AUDIO + "/x-exoplayer-midi";
@@ -140,9 +143,14 @@ public final class MimeTypes {
   public static final String APPLICATION_VOBSUB = BASE_TYPE_APPLICATION + "/vobsub";
   public static final String APPLICATION_PGS = BASE_TYPE_APPLICATION + "/pgs";
   @UnstableApi public static final String APPLICATION_SCTE35 = BASE_TYPE_APPLICATION + "/x-scte35";
+  public static final String APPLICATION_SDP = BASE_TYPE_APPLICATION + "/sdp";
 
   @UnstableApi
   public static final String APPLICATION_CAMERA_MOTION = BASE_TYPE_APPLICATION + "/x-camera-motion";
+
+  @UnstableApi
+  public static final String APPLICATION_DEPTH_METADATA =
+      BASE_TYPE_APPLICATION + "/x-depth-metadata";
 
   @UnstableApi public static final String APPLICATION_EMSG = BASE_TYPE_APPLICATION + "/x-emsg";
   public static final String APPLICATION_DVBSUBS = BASE_TYPE_APPLICATION + "/dvbsubs";
@@ -490,6 +498,29 @@ public final class MimeTypes {
   }
 
   /**
+   * Returns the MP4 object type identifier corresponding to a MIME type, as defined in RFC 6381 and
+   * <a href="https://mp4ra.org/registered-types/object-types">MPEG-4 Object Types</a>.
+   *
+   * @param sampleMimeType The MIME type of the track.
+   * @return The corresponding MP4 object type identifier, or {@code null} if it could not be
+   *     determined.
+   */
+  @UnstableApi
+  @Nullable
+  public static Byte getMp4ObjectTypeFromMimeType(String sampleMimeType) {
+    switch (sampleMimeType) {
+      case MimeTypes.AUDIO_AAC:
+        return (byte) 0x40;
+      case MimeTypes.AUDIO_VORBIS:
+        return (byte) 0xDD;
+      case MimeTypes.VIDEO_MP4V:
+        return (byte) 0x20;
+      default:
+        return null;
+    }
+  }
+
+  /**
    * Returns the MIME type corresponding to an MP4 object type identifier, as defined in RFC 6381
    * and https://mp4ra.org/#/object_types.
    *
@@ -654,14 +685,14 @@ public final class MimeTypes {
     }
     mimeType = Ascii.toLowerCase(mimeType);
     switch (mimeType) {
-        // Normalize uncommon versions of some audio MIME types to their standard equivalent.
+      // Normalize uncommon versions of some audio MIME types to their standard equivalent.
       case BASE_TYPE_AUDIO + "/x-flac":
         return AUDIO_FLAC;
       case BASE_TYPE_AUDIO + "/mp3":
         return AUDIO_MPEG;
       case BASE_TYPE_AUDIO + "/x-wav":
         return AUDIO_WAV;
-        // Normalize MIME types that are often written with upper-case letters to their common form.
+      // Normalize MIME types that are often written with upper-case letters to their common form.
       case "application/x-mpegurl":
         return APPLICATION_M3U8;
       case "audio/mpeg-l1":

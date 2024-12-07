@@ -18,6 +18,7 @@ package androidx.media3.exoplayer;
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertThrows;
 
+import android.content.Context;
 import android.media.MediaFormat;
 import android.net.Uri;
 import androidx.media3.common.C;
@@ -36,22 +37,36 @@ import androidx.media3.extractor.SeekMap;
 import androidx.media3.extractor.SeekMap.SeekPoints;
 import androidx.media3.extractor.SeekPoint;
 import androidx.media3.extractor.TrackOutput;
+import androidx.media3.test.utils.AssetContentProvider;
+import androidx.media3.test.utils.TestUtil;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import okhttp3.mockwebserver.MockResponse;
+import okhttp3.mockwebserver.MockWebServer;
+import okio.Buffer;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 
 /** Tests for {@link MediaExtractorCompat}. */
 @RunWith(AndroidJUnit4.class)
 public class MediaExtractorCompatTest {
+
+  @Rule public final TemporaryFolder tempFolder = new TemporaryFolder();
 
   /**
    * Placeholder data URI which saves us from mocking the data source which MediaExtractorCompat
@@ -184,13 +199,25 @@ public class MediaExtractorCompatTest {
     assertThat(mediaExtractorCompat.getTrackCount()).isEqualTo(2);
     mediaExtractorCompat.selectTrack(0);
     mediaExtractorCompat.selectTrack(1);
-    assertReadSample(/* trackIndex= */ 0, /* timeUs= */ 4, /* sampleData...= */ (byte) 1);
+    assertReadSample(
+        /* trackIndex= */ 0, /* timeUs= */ 4, /* size= */ 1, /* sampleData...= */ (byte) 1);
     mediaExtractorCompat.advance();
-    assertReadSample(/* trackIndex= */ 1, /* timeUs= */ 3, /* sampleData...= */ (byte) 4);
+    assertReadSample(
+        /* trackIndex= */ 1, /* timeUs= */ 3, /* size= */ 1, /* sampleData...= */ (byte) 4);
     mediaExtractorCompat.advance();
-    assertReadSample(/* trackIndex= */ 0, /* timeUs= */ 2, /* sampleData...= */ (byte) 2, (byte) 3);
+    assertReadSample(
+        /* trackIndex= */ 0,
+        /* timeUs= */ 2,
+        /* size= */ 2,
+        /* sampleData...= */ (byte) 2,
+        (byte) 3);
     mediaExtractorCompat.advance();
-    assertReadSample(/* trackIndex= */ 1, /* timeUs= */ 1, /* sampleData...= */ (byte) 5, (byte) 6);
+    assertReadSample(
+        /* trackIndex= */ 1,
+        /* timeUs= */ 1,
+        /* size= */ 2,
+        /* sampleData...= */ (byte) 5,
+        (byte) 6);
   }
 
   @Test
@@ -222,9 +249,10 @@ public class MediaExtractorCompatTest {
     assertThat(mediaExtractorCompat.getTrackCount()).isEqualTo(1);
     mediaExtractorCompat.selectTrack(0);
     mediaExtractorCompat.advance();
-    // After skipping the only sample, there should be none left, and getSampleTime should return
-    // -1.
+    // After skipping the only sample, there should be none left, and getSampleTime and
+    // getSampleSize should return -1.
     assertThat(mediaExtractorCompat.getSampleTime()).isEqualTo(-1);
+    assertThat(mediaExtractorCompat.getSampleSize()).isEqualTo(-1);
     assertThat(mediaExtractorCompat.getTrackFormat(0).getString(MediaFormat.KEY_MIME))
         .isEqualTo(PLACEHOLDER_FORMAT_VIDEO.sampleMimeType);
   }
@@ -243,7 +271,7 @@ public class MediaExtractorCompatTest {
   }
 
   @Test
-  public void getSampleTime_withOutOfMemoryError_producesEndOfInput() throws IOException {
+  public void getSampleTimeAndSize_withOutOfMemoryError_producesEndOfInput() throws IOException {
     // This boolean guarantees that this test remains useful. The throwing read action is being
     // called as a result of an implementation detail (trying to parse a container file with no
     // tracks) that could change in the future. Counting on this implementation detail simplifies
@@ -261,6 +289,7 @@ public class MediaExtractorCompatTest {
         });
     mediaExtractorCompat.setDataSource(PLACEHOLDER_URI, /* offset= */ 0);
     assertThat(mediaExtractorCompat.getSampleTime()).isEqualTo(-1);
+    assertThat(mediaExtractorCompat.getSampleSize()).isEqualTo(-1);
     assertThat(outOfMemoryErrorWasThrown.get()).isTrue();
   }
 
@@ -298,6 +327,7 @@ public class MediaExtractorCompatTest {
 
     assertThat(mediaExtractorCompat.getSampleTrackIndex()).isEqualTo(1);
     assertThat(mediaExtractorCompat.getSampleTime()).isEqualTo(7);
+    assertThat(mediaExtractorCompat.getSampleSize()).isEqualTo(3);
     assertThat(mediaExtractorCompat.readSampleData(scratchBuffer, /* offset= */ 0)).isEqualTo(3);
     assertThat(scratchBuffer.array()).isEqualTo(sampleData);
 
@@ -305,6 +335,7 @@ public class MediaExtractorCompatTest {
 
     assertThat(mediaExtractorCompat.getSampleTrackIndex()).isEqualTo(0);
     assertThat(mediaExtractorCompat.getSampleTime()).isEqualTo(7);
+    assertThat(mediaExtractorCompat.getSampleSize()).isEqualTo(3);
     assertThat(mediaExtractorCompat.readSampleData(scratchBuffer, /* offset= */ 0)).isEqualTo(3);
     assertThat(scratchBuffer.array()).isEqualTo(sampleData);
 
@@ -329,9 +360,11 @@ public class MediaExtractorCompatTest {
     // sample. As a result, to pass this test, the tested implementation must clear the sample
     // queues when seekTo is called.
     assertThat(mediaExtractorCompat.getSampleTime()).isEqualTo(7);
+    assertThat(mediaExtractorCompat.getSampleSize()).isEqualTo(1);
     mediaExtractorCompat.seekTo(/* timeUs= */ 0, MediaExtractorCompat.SEEK_TO_PREVIOUS_SYNC);
     // Test the same sample (and only that sample) is read after the seek to the start.
     assertThat(mediaExtractorCompat.getSampleTime()).isEqualTo(7);
+    assertThat(mediaExtractorCompat.getSampleSize()).isEqualTo(1);
     assertThat(mediaExtractorCompat.advance()).isFalse();
   }
 
@@ -360,18 +393,21 @@ public class MediaExtractorCompatTest {
     byteBuffer.position(byteBuffer.limit());
 
     assertThat(mediaExtractorCompat.getSampleTime()).isEqualTo(1);
+    assertThat(mediaExtractorCompat.getSampleSize()).isEqualTo(2);
     assertThat(mediaExtractorCompat.readSampleData(byteBuffer, /* offset= */ 0)).isEqualTo(2);
     assertThat(byteBuffer.position()).isEqualTo(0);
     assertThat(byteBuffer.limit()).isEqualTo(2);
 
     mediaExtractorCompat.advance();
     assertThat(mediaExtractorCompat.getSampleTime()).isEqualTo(2);
+    assertThat(mediaExtractorCompat.getSampleSize()).isEqualTo(3);
     assertThat(mediaExtractorCompat.readSampleData(byteBuffer, /* offset= */ 2)).isEqualTo(3);
     assertThat(byteBuffer.position()).isEqualTo(2);
     assertThat(byteBuffer.limit()).isEqualTo(5);
 
     mediaExtractorCompat.advance();
     assertThat(mediaExtractorCompat.getSampleTime()).isEqualTo(3);
+    assertThat(mediaExtractorCompat.getSampleSize()).isEqualTo(4);
     assertThat(mediaExtractorCompat.readSampleData(byteBuffer, /* offset= */ 5)).isEqualTo(4);
     assertThat(byteBuffer.position()).isEqualTo(5);
     assertThat(byteBuffer.limit()).isEqualTo(9);
@@ -436,6 +472,7 @@ public class MediaExtractorCompatTest {
     mediaExtractorCompat.selectTrack(1);
     mediaExtractorCompat.seekTo(1773911, MediaExtractorCompat.SEEK_TO_PREVIOUS_SYNC);
     assertThat(mediaExtractorCompat.getSampleTime()).isEqualTo(1773911);
+    assertThat(mediaExtractorCompat.getSampleSize()).isEqualTo(101040);
   }
 
   // Test for b/233756471.
@@ -467,28 +504,124 @@ public class MediaExtractorCompatTest {
     mediaExtractorCompat.setDataSource(PLACEHOLDER_URI, /* offset= */ 0);
     mediaExtractorCompat.selectTrack(/* trackIndex= */ 0);
     assertThat(mediaExtractorCompat.getSampleTime()).isEqualTo(7);
+    assertThat(mediaExtractorCompat.getSampleSize()).isEqualTo(1);
     mediaExtractorCompat.advance();
     assertThat(mediaExtractorCompat.getSampleTime()).isEqualTo(14);
+    assertThat(mediaExtractorCompat.getSampleSize()).isEqualTo(1);
     mediaExtractorCompat.advance();
     assertThat(mediaExtractorCompat.getSampleTime()).isEqualTo(21);
+    assertThat(mediaExtractorCompat.getSampleSize()).isEqualTo(1);
     mediaExtractorCompat.advance();
     assertThat(mediaExtractorCompat.getSampleTime()).isEqualTo(-1);
+    assertThat(mediaExtractorCompat.getSampleSize()).isEqualTo(-1);
 
     // This seek will cause the target position to be invalid, causing an IOException which should
     // be treated as the end of input.
     mediaExtractorCompat.seekTo(/* timeUs= */ 14, MediaExtractorCompat.SEEK_TO_CLOSEST_SYNC);
     assertThat(mediaExtractorCompat.getSampleTime()).isEqualTo(-1);
+    assertThat(mediaExtractorCompat.getSampleSize()).isEqualTo(-1);
 
     // This seek should go to position 0, which should be handled correctly again.
     mediaExtractorCompat.seekTo(/* timeUs= */ 0, MediaExtractorCompat.SEEK_TO_CLOSEST_SYNC);
     assertThat(mediaExtractorCompat.getSampleTime()).isEqualTo(7);
+    assertThat(mediaExtractorCompat.getSampleSize()).isEqualTo(1);
+  }
+
+  @Test
+  public void
+      setDataSourceUsingMethodExpectingContentUri_useAbsoluteFilePathAsUri_setsTrackCountCorrectly()
+          throws IOException {
+    Context context = ApplicationProvider.getApplicationContext();
+    byte[] fileData = TestUtil.getByteArray(context, /* fileName= */ "media/mp4/sample.mp4");
+    File file = tempFolder.newFile();
+    Files.write(Paths.get(file.getAbsolutePath()), fileData);
+    MediaExtractorCompat mediaExtractorCompat = new MediaExtractorCompat(context);
+
+    mediaExtractorCompat.setDataSource(
+        context, Uri.parse(file.getAbsolutePath()), /* headers= */ null);
+
+    assertThat(mediaExtractorCompat.getTrackCount()).isEqualTo(2);
+  }
+
+  @Test
+  public void
+      setDataSourceUsingMethodExpectingContentUri_useHttpUri_setsTrackCountAndHeadersCorrectly()
+          throws Exception {
+    Context context = ApplicationProvider.getApplicationContext();
+    byte[] fileData = TestUtil.getByteArray(context, /* fileName= */ "media/mp4/sample.mp4");
+    try (MockWebServer mockWebServer = new MockWebServer()) {
+      mockWebServer.enqueue(new MockResponse().setBody(new Buffer().write(fileData)));
+      Map<String, String> headers = new HashMap<>();
+      headers.put("k", "v");
+      MediaExtractorCompat mediaExtractorCompat = new MediaExtractorCompat(context);
+
+      mediaExtractorCompat.setDataSource(
+          context, Uri.parse(mockWebServer.url("/test-path").toString()), headers);
+
+      assertThat(mediaExtractorCompat.getTrackCount()).isEqualTo(2);
+      assertThat(mockWebServer.takeRequest().getHeaders().get("k")).isEqualTo("v");
+    }
+  }
+
+  @Test
+  public void setDataSourceUsingMethodExpectingContentUri_useContentUri_setsTrackCountCorrectly()
+      throws IOException {
+    Context context = ApplicationProvider.getApplicationContext();
+    Uri contentUri =
+        AssetContentProvider.buildUri(/* filePath= */ "media/mp4/sample.mp4", /* pipeMode= */ true);
+    MediaExtractorCompat mediaExtractorCompat = new MediaExtractorCompat(context);
+
+    mediaExtractorCompat.setDataSource(context, contentUri, /* headers= */ null);
+
+    assertThat(mediaExtractorCompat.getTrackCount()).isEqualTo(2);
+  }
+
+  @Test
+  public void readNonSyncSample_whenSyncSampleIsExpected_noSampleIsQueued() throws IOException {
+    TrackOutput[] outputs = new TrackOutput[1];
+    byte[] sampleData = new byte[] {(byte) 1, (byte) 2, (byte) 3};
+    fakeExtractor.addReadAction(
+        (input, seekPosition) -> {
+          outputs[0] = extractorOutput.track(/* id= */ 0, C.TRACK_TYPE_VIDEO);
+          extractorOutput.endTracks();
+          outputs[0].format(
+              new Format.Builder()
+                  .setSampleMimeType(MimeTypes.VIDEO_H264)
+                  .setCodecs("avc.123")
+                  .build());
+          return Extractor.RESULT_CONTINUE;
+        });
+    // Add a non-sync sample. This sample should be ignored as a sync sample is expected
+    // at the start of the video.
+    fakeExtractor.addReadAction(
+        (input, seekPosition) -> {
+          outputSampleData(outputs[0], sampleData);
+          outputs[0].sampleMetadata(
+              /* timeUs= */ 7,
+              /* flags= */ 0,
+              /* size= */ 3,
+              /* offset= */ 0,
+              /* cryptoData= */ null);
+          return Extractor.RESULT_CONTINUE;
+        });
+    mediaExtractorCompat.setDataSource(PLACEHOLDER_URI, /* offset= */ 0);
+    mediaExtractorCompat.selectTrack(0);
+
+    // Assert that when a keyframe is expected, no sample is queued if a non-keyframe sample is
+    // read.
+    assertThat(mediaExtractorCompat.getSampleTrackIndex()).isEqualTo(-1);
+    assertThat(mediaExtractorCompat.getSampleTime()).isEqualTo(-1);
+    assertThat(mediaExtractorCompat.getSampleSize()).isEqualTo(-1);
+    assertThat(mediaExtractorCompat.readSampleData(ByteBuffer.allocate(0), /* offset= */ 0))
+        .isEqualTo(-1);
   }
 
   // Internal methods.
 
-  private void assertReadSample(int trackIndex, long timeUs, byte... sampleData) {
+  private void assertReadSample(int trackIndex, long timeUs, int size, byte... sampleData) {
     assertThat(mediaExtractorCompat.getSampleTrackIndex()).isEqualTo(trackIndex);
     assertThat(mediaExtractorCompat.getSampleTime()).isEqualTo(timeUs);
+    assertThat(mediaExtractorCompat.getSampleSize()).isEqualTo(size);
     ByteBuffer buffer = ByteBuffer.allocate(100);
     assertThat(mediaExtractorCompat.readSampleData(buffer, /* offset= */ 0))
         .isEqualTo(sampleData.length);

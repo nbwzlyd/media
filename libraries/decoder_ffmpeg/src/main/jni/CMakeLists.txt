@@ -24,12 +24,12 @@ project(libffmpegJNI C CXX)
 set(ffmpeg_location "${CMAKE_CURRENT_SOURCE_DIR}/ffmpeg")
 set(ffmpeg_binaries "${ffmpeg_location}/android-libs/${ANDROID_ABI}")
 
-foreach(ffmpeg_lib avutil swresample avcodec av3a_binaural_render AVS3AudioDec)
-    set(ffmpeg_lib_filename lib${ffmpeg_lib}.a)
+foreach(ffmpeg_lib avutil swresample avcodec swscale av3a_binaural_render AVS3AudioDec)
+    set(ffmpeg_lib_filename lib${ffmpeg_lib}.so)
     set(ffmpeg_lib_file_path ${ffmpeg_binaries}/${ffmpeg_lib_filename})
     add_library(
             ${ffmpeg_lib}
-            STATIC
+            SHARED
             IMPORTED)
     set_target_properties(
             ${ffmpeg_lib} PROPERTIES
@@ -37,7 +37,27 @@ foreach(ffmpeg_lib avutil swresample avcodec av3a_binaural_render AVS3AudioDec)
             ${ffmpeg_lib_file_path})
 endforeach()
 
+
+set(yuv_location "${CMAKE_CURRENT_SOURCE_DIR}/libyuv")
+set(yuv_binaries "${yuv_location}/android-libs/${ANDROID_ABI}")
+
+foreach(yuv_lib yuv)
+    set(yuv_lib_filename lib${yuv_lib}.so)
+    set(yuv_lib_file_path ${yuv_binaries}/${yuv_lib_filename})
+    add_library(
+            ${yuv_lib}
+            SHARED
+            IMPORTED)
+    set_target_properties(
+            ${yuv_lib} PROPERTIES
+            IMPORTED_LOCATION
+            ${yuv_lib_file_path})
+endforeach()
+
+
 include_directories(${ffmpeg_location})
+include_directories("${yuv_location}/include")
+
 find_library(android_log_lib log)
 
 add_library(ffmpegJNI
@@ -45,13 +65,16 @@ add_library(ffmpegJNI
             ffmpeg_jni.cc)
 
 target_link_libraries(ffmpegJNI
-        PRIVATE android
-        PRIVATE swresample
-        PRIVATE avcodec
-        PRIVATE avutil
-        PRIVATE av3a_binaural_render
-        PRIVATE AVS3AudioDec
-        PRIVATE ${android_log_lib})
+                      PRIVATE android
+                      PRIVATE m
+                      PRIVATE swresample
+                      PRIVATE avcodec
+                      PRIVATE avutil
+                      PRIVATE swscale
+                      PRIVATE yuv
+                      PRIVATE av3a_binaural_render
+                      PRIVATE AVS3AudioDec
+                      PRIVATE ${android_log_lib})
 
 # Additional flags needed for "arm64-v8a" from NDK 23.1.7779620 and above.
 # See https://github.com/google/ExoPlayer/issues/9933#issuecomment-1029775358.

@@ -1428,16 +1428,6 @@ public class MediaController implements Player {
   }
 
   /**
-   * @deprecated Use {@link #hasPreviousMediaItem()} instead.
-   */
-  @UnstableApi
-  @Deprecated
-  @Override
-  public final boolean hasPrevious() {
-    return hasPreviousMediaItem();
-  }
-
-  /**
    * @deprecated Use {@link #hasNextMediaItem()} instead.
    */
   @UnstableApi
@@ -1445,16 +1435,6 @@ public class MediaController implements Player {
   @Override
   public final boolean hasNext() {
     return hasNextMediaItem();
-  }
-
-  /**
-   * @deprecated Use {@link #hasPreviousMediaItem()} instead.
-   */
-  @UnstableApi
-  @Deprecated
-  @Override
-  public final boolean hasPreviousWindow() {
-    return hasPreviousMediaItem();
   }
 
   /**
@@ -1477,16 +1457,6 @@ public class MediaController implements Player {
   public final boolean hasNextMediaItem() {
     verifyApplicationThread();
     return isConnected() && impl.hasNextMediaItem();
-  }
-
-  /**
-   * @deprecated Use {@link #seekToPreviousMediaItem()} instead.
-   */
-  @UnstableApi
-  @Deprecated
-  @Override
-  public final void previous() {
-    seekToPreviousMediaItem();
   }
 
   /**

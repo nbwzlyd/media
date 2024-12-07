@@ -22,6 +22,7 @@ import androidx.media3.common.MimeTypes;
 import androidx.media3.common.util.LibraryLoader;
 import androidx.media3.common.util.Log;
 import androidx.media3.common.util.UnstableApi;
+
 import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
 
 /** Configures and queries the underlying native library. */
@@ -95,8 +96,11 @@ public final class FfmpegLibrary {
    *
    * @param mimeType The MIME type to check.
    */
-  public static boolean supportsFormat(String mimeType) {
+  public static boolean supportsFormat(@Nullable String mimeType) {
     if (!isAvailable()) {
+      return false;
+    }
+    if (mimeType == null) {
       return false;
     }
     @Nullable String codecName = getCodecName(mimeType);
@@ -149,12 +153,25 @@ public final class FfmpegLibrary {
         return "pcm_mulaw";
       case MimeTypes.AUDIO_ALAW:
         return "pcm_alaw";
+      case MimeTypes.AUDIO_AV3A:
+        return "libarcdav3a";
       case MimeTypes.VIDEO_H264:
         return "h264";
       case MimeTypes.VIDEO_H265:
+      case MimeTypes.VIDEO_DOLBY_VISION:
         return "hevc";
-      case MimeTypes.AUDIO_AV3A:
-        return "libarcdav3a";
+      case MimeTypes.VIDEO_VP8:
+        return "vp8";
+      case MimeTypes.VIDEO_VP9:
+        return "vp9";
+      case MimeTypes.VIDEO_WEBM:
+        return "webm";
+      case MimeTypes.VIDEO_MPEG:
+        return "mpegvideo";
+      case MimeTypes.VIDEO_MPEG2:
+        return "mpeg2video";
+      case MimeTypes.VIDEO_ProRes:
+        return "prores";
       default:
         return null;
     }

@@ -19,10 +19,10 @@ import static androidx.media3.extractor.ts.TsPayloadReader.EsInfo.AUDIO_TYPE_UND
 import static androidx.media3.extractor.ts.TsPayloadReader.FLAG_PAYLOAD_UNIT_START_INDICATOR;
 import static java.lang.annotation.ElementType.TYPE_USE;
 
-import android.util.Log;
 import android.util.SparseArray;
 import android.util.SparseBooleanArray;
 import android.util.SparseIntArray;
+
 import androidx.annotation.IntDef;
 import androidx.annotation.Nullable;
 import androidx.media3.common.C;
@@ -58,9 +58,7 @@ import java.util.Collections;
 import java.util.List;
 import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
 
-/**
- * Extracts data from the MPEG-2 TS container format.
- */
+/** Extracts data from the MPEG-2 TS container format. */
 @UnstableApi
 public final class TsExtractor implements Extractor {
 
@@ -69,7 +67,7 @@ public final class TsExtractor implements Extractor {
    * SubtitleParser.Factory}.
    */
   public static ExtractorsFactory newFactory(SubtitleParser.Factory subtitleParserFactory) {
-    return () -> new Extractor[]{new TsExtractor(subtitleParserFactory)};
+    return () -> new Extractor[] {new TsExtractor(subtitleParserFactory)};
   }
 
   /**
@@ -80,18 +78,12 @@ public final class TsExtractor implements Extractor {
   @Retention(RetentionPolicy.SOURCE)
   @Target(TYPE_USE)
   @IntDef({MODE_MULTI_PMT, MODE_SINGLE_PMT, MODE_HLS})
-  public @interface Mode {
+  public @interface Mode {}
 
-  }
-
-  /**
-   * Behave as defined in ISO/IEC 13818-1.
-   */
+  /** Behave as defined in ISO/IEC 13818-1. */
   public static final int MODE_MULTI_PMT = 0;
 
-  /**
-   * Assume only one PMT will be contained in the stream, even if more are declared by the PAT.
-   */
+  /** Assume only one PMT will be contained in the stream, even if more are declared by the PAT. */
   public static final int MODE_SINGLE_PMT = 1;
 
   /**
@@ -110,9 +102,7 @@ public final class TsExtractor implements Extractor {
   @IntDef(
       flag = true,
       value = {FLAG_EMIT_RAW_SUBTITLE_DATA})
-  public @interface Flags {
-
-  }
+  public @interface Flags {}
 
   /**
    * Flag to use the source subtitle formats without modification. If unset, subtitles will be
@@ -126,8 +116,8 @@ public final class TsExtractor implements Extractor {
   @Deprecated
   public static final ExtractorsFactory FACTORY =
       () ->
-          new Extractor[]{
-              new TsExtractor(FLAG_EMIT_RAW_SUBTITLE_DATA, SubtitleParser.Factory.UNSUPPORTED)
+          new Extractor[] {
+            new TsExtractor(FLAG_EMIT_RAW_SUBTITLE_DATA, SubtitleParser.Factory.UNSUPPORTED)
           };
 
   public static final int TS_PACKET_SIZE = 188;
@@ -191,8 +181,7 @@ public final class TsExtractor implements Extractor {
   private boolean tracksEnded;
   private boolean hasOutputSeekMap;
   private boolean pendingSeekToStart;
-  @Nullable
-  private TsPayloadReader id3Reader;
+  @Nullable private TsPayloadReader id3Reader;
   private int bytesSinceLastSync;
   private int pcrPid;
 
@@ -214,7 +203,7 @@ public final class TsExtractor implements Extractor {
    * Constructs an instance.
    *
    * @param subtitleParserFactory The {@link SubtitleParser.Factory} for parsing subtitles during
-   *                              extraction.
+   *     extraction.
    */
   public TsExtractor(SubtitleParser.Factory subtitleParserFactory) {
     this(
@@ -229,9 +218,9 @@ public final class TsExtractor implements Extractor {
   /**
    * Constructs an instance.
    *
-   * @param extractorFlags        Flags that control the extractor's behavior.
+   * @param extractorFlags Flags that control the extractor's behavior.
    * @param subtitleParserFactory The {@link SubtitleParser.Factory} for parsing subtitles during
-   *                              extraction.
+   *     extraction.
    */
   public TsExtractor(@Flags int extractorFlags, SubtitleParser.Factory subtitleParserFactory) {
     this(
@@ -245,7 +234,7 @@ public final class TsExtractor implements Extractor {
 
   /**
    * @deprecated Use {@link #TsExtractor(int, int, SubtitleParser.Factory, TimestampAdjuster,
-   * TsPayloadReader.Factory, int)} instead.
+   *     TsPayloadReader.Factory, int)} instead.
    */
   @Deprecated
   public TsExtractor(@DefaultTsPayloadReaderFactory.Flags int defaultTsPayloadReaderFlags) {
@@ -260,7 +249,7 @@ public final class TsExtractor implements Extractor {
 
   /**
    * @deprecated Use {@link #TsExtractor(int, int, SubtitleParser.Factory, TimestampAdjuster,
-   * TsPayloadReader.Factory, int)} instead.
+   *     TsPayloadReader.Factory, int)} instead.
    */
   @Deprecated
   public TsExtractor(
@@ -278,7 +267,7 @@ public final class TsExtractor implements Extractor {
 
   /**
    * @deprecated Use {@link #TsExtractor(int, int, SubtitleParser.Factory, TimestampAdjuster,
-   * TsPayloadReader.Factory, int)} instead.
+   *     TsPayloadReader.Factory, int)} instead.
    */
   @Deprecated
   public TsExtractor(
@@ -296,7 +285,7 @@ public final class TsExtractor implements Extractor {
 
   /**
    * @deprecated Use {@link #TsExtractor(int, int, SubtitleParser.Factory, TimestampAdjuster,
-   * TsPayloadReader.Factory, int)} instead.
+   *     TsPayloadReader.Factory, int)} instead.
    */
   @Deprecated
   public TsExtractor(
@@ -316,21 +305,21 @@ public final class TsExtractor implements Extractor {
   /**
    * Constructs an instance.
    *
-   * @param mode                  Mode for the extractor. One of {@link #MODE_MULTI_PMT}, {@link #MODE_SINGLE_PMT}
-   *                              and {@link #MODE_HLS}.
-   * @param extractorFlags        Flags that control the extractor's behavior.
+   * @param mode Mode for the extractor. One of {@link #MODE_MULTI_PMT}, {@link #MODE_SINGLE_PMT}
+   *     and {@link #MODE_HLS}.
+   * @param extractorFlags Flags that control the extractor's behavior.
    * @param subtitleParserFactory The {@link SubtitleParser.Factory} for parsing subtitles during
-   *                              extraction.
-   * @param timestampAdjuster     A timestamp adjuster for offsetting and scaling sample timestamps.
-   * @param payloadReaderFactory  Factory for injecting a custom set of payload readers.
-   * @param timestampSearchBytes  The number of bytes searched from a given position in the stream to
-   *                              find a PCR timestamp. If this value is too small, the duration might be unknown and seeking
-   *                              might not be supported for high bitrate progressive streams. Setting a large value for this
-   *                              field might be inefficient though because the extractor stores a buffer of {@code
-   *                              timestampSearchBytes} bytes when determining the duration or when performing a seek
-   *                              operation. The default value is {@link #DEFAULT_TIMESTAMP_SEARCH_BYTES}. If the number of
-   *                              bytes left in the stream from the current position is less than {@code
-   *                              timestampSearchBytes}, the search is performed on the bytes left.
+   *     extraction.
+   * @param timestampAdjuster A timestamp adjuster for offsetting and scaling sample timestamps.
+   * @param payloadReaderFactory Factory for injecting a custom set of payload readers.
+   * @param timestampSearchBytes The number of bytes searched from a given position in the stream to
+   *     find a PCR timestamp. If this value is too small, the duration might be unknown and seeking
+   *     might not be supported for high bitrate progressive streams. Setting a large value for this
+   *     field might be inefficient though because the extractor stores a buffer of {@code
+   *     timestampSearchBytes} bytes when determining the duration or when performing a seek
+   *     operation. The default value is {@link #DEFAULT_TIMESTAMP_SEARCH_BYTES}. If the number of
+   *     bytes left in the stream from the current position is less than {@code
+   *     timestampSearchBytes}, the search is performed on the bytes left.
    */
   public TsExtractor(
       @Mode int mode,
@@ -620,7 +609,8 @@ public final class TsExtractor implements Extractor {
     if (endOfPacket > limit) {
       bytesSinceLastSync += syncBytePosition - searchStart;
       if (mode == MODE_HLS && bytesSinceLastSync > TS_PACKET_SIZE * 2) {
-        Log.d("", "Cannot find sync byte. Most likely not a Transport Stream.", /* cause= */ null);
+        throw ParserException.createForMalformedContainer(
+            "Cannot find sync byte. Most likely not a Transport Stream.", /* cause= */ null);
       }
     } else {
       // We have found a packet within the buffer.
@@ -648,9 +638,7 @@ public final class TsExtractor implements Extractor {
     id3Reader = null;
   }
 
-  /**
-   * Parses Program Association Table data.
-   */
+  /** Parses Program Association Table data. */
   private class PatReader implements SectionPayloadReader {
 
     private final ParsableBitArray patScratch;
@@ -705,9 +693,7 @@ public final class TsExtractor implements Extractor {
     }
   }
 
-  /**
-   * Parses Program Map Table.
-   */
+  /** Parses Program Map Table. */
   private class PmtReader implements SectionPayloadReader {
 
     private static final int TS_PMT_DESC_REGISTRATION = 0x05;
@@ -873,7 +859,7 @@ public final class TsExtractor implements Extractor {
      * Returns the stream info read from the available descriptors. Sets {@code data}'s position to
      * the end of the descriptors.
      *
-     * @param data   A buffer with its position set to the start of the first descriptor.
+     * @param data A buffer with its position set to the start of the first descriptor.
      * @param length The length of descriptors to read from the current position in {@code data}.
      * @return The stream info read from the available descriptors.
      */

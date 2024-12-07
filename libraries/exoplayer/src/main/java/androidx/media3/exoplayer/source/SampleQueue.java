@@ -808,8 +808,8 @@ public class SampleQueue implements TrackOutput {
     if (length > 0) {
       // Ensure sample data doesn't overlap.
       int previousSampleRelativeIndex = getRelativeIndex(length - 1);
-//      checkArgument(
-//          offsets[previousSampleRelativeIndex] + sizes[previousSampleRelativeIndex] <= offset);
+     // checkArgument(
+     //     offsets[previousSampleRelativeIndex] + sizes[previousSampleRelativeIndex] <= offset);
       if (offsets[previousSampleRelativeIndex] + sizes[previousSampleRelativeIndex] > offset) return;
     }
 

@@ -16,6 +16,7 @@
 
 package androidx.media3.transformer;
 
+import static androidx.media3.common.ColorInfo.isTransferHdr;
 import static androidx.media3.common.util.Assertions.checkArgument;
 import static androidx.media3.common.util.Assertions.checkNotNull;
 import static androidx.media3.common.util.Assertions.checkState;
@@ -211,7 +212,9 @@ public final class DefaultEncoderFactory implements Codec.EncoderFactory {
     if (format.bitrate == Format.NO_VALUE) {
       format = format.buildUpon().setAverageBitrate(DEFAULT_AUDIO_BITRATE).build();
     }
-    checkNotNull(format.sampleMimeType);
+    if (format.sampleMimeType == null) {
+      throw createNoSupportedMimeTypeException(format, /* isVideo= */ false);
+    }
     MediaFormat mediaFormat = createMediaFormatFromFormat(format);
     ImmutableList<MediaCodecInfo> mediaCodecInfos =
         EncoderUtil.getSupportedEncoders(format.sampleMimeType);
@@ -240,13 +243,16 @@ public final class DefaultEncoderFactory implements Codec.EncoderFactory {
     if (format.frameRate == Format.NO_VALUE || deviceNeedsDefaultFrameRateWorkaround()) {
       format = format.buildUpon().setFrameRate(DEFAULT_FRAME_RATE).build();
     }
+    if (format.sampleMimeType == null) {
+      throw createNoSupportedMimeTypeException(format, /* isVideo= */ true);
+    }
     checkArgument(format.width != Format.NO_VALUE);
     checkArgument(format.height != Format.NO_VALUE);
     // According to interface Javadoc, format.rotationDegrees should be 0. The video should always
     // be encoded in landscape orientation.
     checkArgument(format.height <= format.width);
     checkArgument(format.rotationDegrees == 0);
-    checkNotNull(format.sampleMimeType);
+
     checkStateNotNull(videoEncoderSelector);
 
     @Nullable
@@ -302,7 +308,9 @@ public final class DefaultEncoderFactory implements Codec.EncoderFactory {
 
     if (supportedVideoEncoderSettings.profile != VideoEncoderSettings.NO_VALUE
         && supportedVideoEncoderSettings.level != VideoEncoderSettings.NO_VALUE
-        && Util.SDK_INT >= 23) {
+        && Util.SDK_INT >= 24) {
+      // For API levels below 24, setting profile and level can lead to failures in MediaCodec
+      // configuration. The encoder selects the profile/level when we don't set them.
       // Set profile and level at the same time to maximize compatibility, or the encoder will pick
       // the values.
       mediaFormat.setInteger(MediaFormat.KEY_PROFILE, supportedVideoEncoderSettings.profile);
@@ -343,26 +351,27 @@ public final class DefaultEncoderFactory implements Codec.EncoderFactory {
               : (int) floor(iFrameIntervalSeconds));
     }
 
-    if (Util.SDK_INT >= 23) {
+    int operatingRate = supportedVideoEncoderSettings.operatingRate;
+    int priority = supportedVideoEncoderSettings.priority;
+    if (Util.SDK_INT >= 23
+        && operatingRate != VideoEncoderSettings.RATE_UNSET
+        && priority != VideoEncoderSettings.RATE_UNSET) {
       // Setting operating rate and priority is supported from API 23.
-      if (supportedVideoEncoderSettings.operatingRate == VideoEncoderSettings.NO_VALUE
-          && supportedVideoEncoderSettings.priority == VideoEncoderSettings.NO_VALUE) {
+      if (operatingRate == VideoEncoderSettings.NO_VALUE
+          && priority == VideoEncoderSettings.NO_VALUE) {
         adjustMediaFormatForEncoderPerformanceSettings(mediaFormat);
       } else {
-        if (supportedVideoEncoderSettings.operatingRate != VideoEncoderSettings.NO_VALUE) {
-          mediaFormat.setInteger(
-              MediaFormat.KEY_OPERATING_RATE, supportedVideoEncoderSettings.operatingRate);
+        if (operatingRate != VideoEncoderSettings.NO_VALUE) {
+          mediaFormat.setInteger(MediaFormat.KEY_OPERATING_RATE, operatingRate);
         }
-        if (supportedVideoEncoderSettings.priority != VideoEncoderSettings.NO_VALUE) {
-          mediaFormat.setInteger(MediaFormat.KEY_PRIORITY, supportedVideoEncoderSettings.priority);
+        if (priority != VideoEncoderSettings.NO_VALUE) {
+          mediaFormat.setInteger(MediaFormat.KEY_PRIORITY, priority);
         }
       }
     }
 
     if (Util.SDK_INT >= 35) {
-      // TODO: b/333552477 - Redefinition of MediaFormat.KEY_IMPORTANCE, remove after API35 is
-      //  released.
-      mediaFormat.setInteger("importance", max(0, -codecPriority));
+      mediaFormat.setInteger(MediaFormat.KEY_IMPORTANCE, max(0, -codecPriority));
     }
 
     return new DefaultCodec(
@@ -576,14 +585,19 @@ public final class DefaultEncoderFactory implements Codec.EncoderFactory {
     return Util.SDK_INT >= 31
         && Util.SDK_INT <= 34
         && (Build.SOC_MODEL.equals("SM8550")
-            || Build.SOC_MODEL.equals("T612")
             || Build.SOC_MODEL.equals("SM7450")
-            || Build.SOC_MODEL.equals("SM6450"));
+            || Build.SOC_MODEL.equals("SM6450")
+            || Build.SOC_MODEL.equals("SC9863A")
+            || Build.SOC_MODEL.equals("T612")
+            || Build.SOC_MODEL.equals("T606")
+            || Build.SOC_MODEL.equals("T603"));
   }
 
   /**
-   * Applying suggested profile/level settings from
+   * Applying suggested profile settings from
    * https://developer.android.com/media/optimize/sharing#b-frames_and_encoding_profiles
+   *
+   * <p>Sets H.264 level only if it wasn't set previously.
    *
    * <p>The adjustment is applied in-place to {@code mediaFormat}.
    */
@@ -610,7 +624,9 @@ public final class DefaultEncoderFactory implements Codec.EncoderFactory {
         // Use the highest supported profile. Don't configure B-frames, because it doesn't work on
         // some devices.
         mediaFormat.setInteger(MediaFormat.KEY_PROFILE, expectedEncodingProfile);
-        mediaFormat.setInteger(MediaFormat.KEY_LEVEL, supportedEncodingLevel);
+        if (!mediaFormat.containsKey(MediaFormat.KEY_LEVEL)) {
+          mediaFormat.setInteger(MediaFormat.KEY_LEVEL, supportedEncodingLevel);
+        }
       }
     } else if (Util.SDK_INT >= 26 && !deviceNeedsNoH264HighProfileWorkaround()) {
       int expectedEncodingProfile = MediaCodecInfo.CodecProfileLevel.AVCProfileHigh;
@@ -622,7 +638,9 @@ public final class DefaultEncoderFactory implements Codec.EncoderFactory {
         // MediaFormat.KEY_LATENCY. This accommodates some limitations in the MediaMuxer in these
         // system versions.
         mediaFormat.setInteger(MediaFormat.KEY_PROFILE, expectedEncodingProfile);
-        mediaFormat.setInteger(MediaFormat.KEY_LEVEL, supportedEncodingLevel);
+        if (!mediaFormat.containsKey(MediaFormat.KEY_LEVEL)) {
+          mediaFormat.setInteger(MediaFormat.KEY_LEVEL, supportedEncodingLevel);
+        }
         // TODO(b/210593256): Set KEY_LATENCY to 2 to enable B-frame production after in-app muxing
         // is the default and it supports B-frames.
         mediaFormat.setInteger(MediaFormat.KEY_LATENCY, 1);
@@ -636,7 +654,9 @@ public final class DefaultEncoderFactory implements Codec.EncoderFactory {
       // Use the baseline profile for safest results, as encoding in baseline is required per
       // https://source.android.com/compatibility/5.0/android-5.0-cdd#5_2_video_encoding
       mediaFormat.setInteger(MediaFormat.KEY_PROFILE, expectedEncodingProfile);
-      mediaFormat.setInteger(MediaFormat.KEY_LEVEL, supportedLevel);
+      if (!mediaFormat.containsKey(MediaFormat.KEY_LEVEL)) {
+        mediaFormat.setInteger(MediaFormat.KEY_LEVEL, supportedLevel);
+      }
     }
     // For API levels below 24, setting profile and level can lead to failures in MediaCodec
     // configuration. The encoder selects the profile/level when we don't set them.
@@ -704,6 +724,22 @@ public final class DefaultEncoderFactory implements Codec.EncoderFactory {
     // Assume medium motion factor.
     // 1080p60 -> 16.6Mbps, 720p30 -> 3.7Mbps.
     return (int) (width * height * frameRate * 0.07 * 2);
+  }
+
+  private static ExportException createNoSupportedMimeTypeException(
+      Format format, boolean isVideo) {
+    String errorMessage = "No MIME type is supported by both encoder and muxer.";
+    int errorCode = ExportException.ERROR_CODE_ENCODING_FORMAT_UNSUPPORTED;
+
+    if (isVideo && isTransferHdr(format.colorInfo)) {
+      errorMessage += " Requested HDR colorInfo: " + format.colorInfo;
+    }
+
+    return ExportException.createForCodec(
+        new IllegalArgumentException(errorMessage),
+        errorCode,
+        new ExportException.CodecInfo(
+            format.toString(), isVideo, /* isDecoder= */ false, /* name= */ null));
   }
 
   @RequiresNonNull("#1.sampleMimeType")

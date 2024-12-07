@@ -17,8 +17,7 @@
 package androidx.media3.transformer;
 
 import static androidx.media3.transformer.AndroidTestUtil.FORCE_TRANSCODE_VIDEO_EFFECTS;
-import static androidx.media3.transformer.AndroidTestUtil.MP4_ASSET_FORMAT;
-import static androidx.media3.transformer.AndroidTestUtil.MP4_ASSET_FRAME_COUNT;
+import static androidx.media3.transformer.AndroidTestUtil.MP4_ASSET;
 import static androidx.media3.transformer.AndroidTestUtil.assumeFormatsSupported;
 import static com.google.common.truth.Truth.assertThat;
 
@@ -70,18 +69,20 @@ public class ForceEndOfStreamTest {
       return;
     }
     assumeFormatsSupported(
-        context, testId, /* inputFormat= */ MP4_ASSET_FORMAT, /* outputFormat= */ MP4_ASSET_FORMAT);
+        context,
+        testId,
+        /* inputFormat= */ MP4_ASSET.videoFormat,
+        /* outputFormat= */ MP4_ASSET.videoFormat);
     int framesToSkip = 4;
 
     ExportTestResult testResult =
         new TransformerAndroidTestRunner.Builder(context, buildTransformer(context, framesToSkip))
             .build()
-            .run(
-                testId, createComposition(MediaItem.fromUri(AndroidTestUtil.MP4_ASSET_URI_STRING)));
+            .run(testId, createComposition(MediaItem.fromUri(MP4_ASSET.uri)));
 
     assertThat(testResult.analysisException).isNull();
     assertThat(testResult.exportResult.videoFrameCount)
-        .isEqualTo(MP4_ASSET_FRAME_COUNT - framesToSkip);
+        .isEqualTo(MP4_ASSET.videoFrameCount - framesToSkip);
     assertThat(new File(testResult.filePath).length()).isGreaterThan(0);
   }
 
@@ -91,17 +92,19 @@ public class ForceEndOfStreamTest {
       return;
     }
     assumeFormatsSupported(
-        context, testId, /* inputFormat= */ MP4_ASSET_FORMAT, /* outputFormat= */ MP4_ASSET_FORMAT);
+        context,
+        testId,
+        /* inputFormat= */ MP4_ASSET.videoFormat,
+        /* outputFormat= */ MP4_ASSET.videoFormat);
 
     ExportTestResult testResult =
         new TransformerAndroidTestRunner.Builder(
                 context, buildTransformer(context, /* framesToSkip= */ 0))
             .build()
-            .run(
-                testId, createComposition(MediaItem.fromUri(AndroidTestUtil.MP4_ASSET_URI_STRING)));
+            .run(testId, createComposition(MediaItem.fromUri(MP4_ASSET.uri)));
 
     assertThat(testResult.analysisException).isNull();
-    assertThat(testResult.exportResult.videoFrameCount).isEqualTo(MP4_ASSET_FRAME_COUNT);
+    assertThat(testResult.exportResult.videoFrameCount).isEqualTo(MP4_ASSET.videoFrameCount);
     assertThat(new File(testResult.filePath).length()).isGreaterThan(0);
   }
 
@@ -120,17 +123,18 @@ public class ForceEndOfStreamTest {
         .setAssetLoaderFactory(
             new DefaultAssetLoaderFactory(
                 context,
-                new FrameDroppingDecoderFactory(context, MP4_ASSET_FRAME_COUNT, framesToSkip),
+                new FrameDroppingDecoderFactory(context, MP4_ASSET.videoFrameCount, framesToSkip),
                 Clock.DEFAULT))
         .build();
   }
 
   private static Composition createComposition(MediaItem mediaItem) {
     return new Composition.Builder(
-            new EditedMediaItemSequence(
-                new EditedMediaItem.Builder(mediaItem)
-                    .setEffects(FORCE_TRANSCODE_VIDEO_EFFECTS)
-                    .build()))
+            new EditedMediaItemSequence.Builder(
+                    new EditedMediaItem.Builder(mediaItem)
+                        .setEffects(FORCE_TRANSCODE_VIDEO_EFFECTS)
+                        .build())
+                .build())
         .build();
   }
 

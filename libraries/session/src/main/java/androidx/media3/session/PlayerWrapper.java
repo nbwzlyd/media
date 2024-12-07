@@ -560,25 +560,9 @@ import java.util.List;
   @SuppressWarnings("deprecation") // Forwarding deprecated call
   @Deprecated
   @Override
-  public boolean hasPrevious() {
-    verifyApplicationThread();
-    return super.hasPrevious();
-  }
-
-  @SuppressWarnings("deprecation") // Forwarding deprecated call
-  @Deprecated
-  @Override
   public boolean hasNext() {
     verifyApplicationThread();
     return super.hasNext();
-  }
-
-  @SuppressWarnings("deprecation") // Forwarding deprecated call
-  @Deprecated
-  @Override
-  public boolean hasPreviousWindow() {
-    verifyApplicationThread();
-    return super.hasPreviousWindow();
   }
 
   @SuppressWarnings("deprecation") // Forwarding deprecated call
@@ -599,14 +583,6 @@ import java.util.List;
   public boolean hasNextMediaItem() {
     verifyApplicationThread();
     return super.hasNextMediaItem();
-  }
-
-  @SuppressWarnings("deprecation") // Forwarding deprecated call
-  @Deprecated
-  @Override
-  public void previous() {
-    verifyApplicationThread();
-    super.previous();
   }
 
   @SuppressWarnings("deprecation") // Forwarding deprecated call
@@ -1330,8 +1306,8 @@ import java.util.List;
         return PlaybackStateCompat.ACTION_STOP;
       case Player.COMMAND_ADJUST_DEVICE_VOLUME:
       case Player.COMMAND_CHANGE_MEDIA_ITEMS:
-        // TODO(b/227346735): Handle this through
-        // MediaSessionCompat.setFlags(FLAG_HANDLES_QUEUE_COMMANDS)
+      // TODO(b/227346735): Handle this through
+      // MediaSessionCompat.setFlags(FLAG_HANDLES_QUEUE_COMMANDS)
       case Player.COMMAND_GET_AUDIO_ATTRIBUTES:
       case Player.COMMAND_GET_CURRENT_MEDIA_ITEM:
       case Player.COMMAND_GET_DEVICE_VOLUME:

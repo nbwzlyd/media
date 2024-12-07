@@ -23,6 +23,7 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.AppCompatButton;
+import androidx.appcompat.widget.AppCompatCheckBox;
 import androidx.appcompat.widget.AppCompatTextView;
 import androidx.media3.common.Effect;
 import androidx.media3.common.MediaItem;
@@ -63,6 +64,8 @@ import org.json.JSONObject;
  */
 public final class CompositionPreviewActivity extends AppCompatActivity {
   private static final String TAG = "CompPreviewActivity";
+  private static final String AUDIO_URI =
+      "https://storage.googleapis.com/exoplayer-test-media-0/play.mp3";
 
   private ArrayList<String> sequenceAssetTitles;
   private boolean[] selectedMediaItems;
@@ -75,6 +78,8 @@ public final class CompositionPreviewActivity extends AppCompatActivity {
   private AppCompatButton exportButton;
   private AppCompatTextView exportInformationTextView;
   private Stopwatch exportStopwatch;
+  private boolean includeBackgroundAudioTrack;
+  private boolean appliesVideoEffects;
 
   @Override
   protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -93,6 +98,14 @@ public final class CompositionPreviewActivity extends AppCompatActivity {
     exportInformationTextView = findViewById(R.id.export_information_text);
     exportButton = findViewById(R.id.composition_export_button);
     exportButton.setOnClickListener(view -> exportComposition());
+
+    AppCompatCheckBox backgroundAudioCheckBox = findViewById(R.id.background_audio_checkbox);
+    backgroundAudioCheckBox.setOnCheckedChangeListener(
+        (compoundButton, checked) -> includeBackgroundAudioTrack = checked);
+
+    AppCompatCheckBox applyVideoEffectsCheckBox = findViewById(R.id.apply_video_effects_checkbox);
+    applyVideoEffectsCheckBox.setOnCheckedChangeListener(
+        ((compoundButton, checked) -> appliesVideoEffects = checked));
 
     presetDescriptions = getResources().getStringArray(R.array.preset_descriptions);
     // Select two media items by default.
@@ -137,9 +150,15 @@ public final class CompositionPreviewActivity extends AppCompatActivity {
     String[] presetUris = getResources().getStringArray(/* id= */ R.array.preset_uris);
     int[] presetDurationsUs = getResources().getIntArray(/* id= */ R.array.preset_durations);
     List<EditedMediaItem> mediaItems = new ArrayList<>();
-    ImmutableList<Effect> effects =
-        ImmutableList.of(
-            MatrixTransformationFactory.createDizzyCropEffect(), RgbFilter.createGrayscaleFilter());
+    ImmutableList<Effect> videoEffects =
+        appliesVideoEffects
+            ? ImmutableList.of(
+                MatrixTransformationFactory.createDizzyCropEffect(),
+                RgbFilter.createGrayscaleFilter())
+            : ImmutableList.of();
+    // Preview requires all sequences to be the same duration, so calculate main sequence duration
+    // and limit background sequence duration to match.
+    long videoSequenceDurationUs = 0;
     for (int i = 0; i < selectedMediaItems.length; i++) {
       if (selectedMediaItems[i]) {
         SonicAudioProcessor pitchChanger = new SonicAudioProcessor();
@@ -154,20 +173,41 @@ public final class CompositionPreviewActivity extends AppCompatActivity {
                 .setEffects(
                     new Effects(
                         /* audioProcessors= */ ImmutableList.of(pitchChanger),
-                        /* videoEffects= */ effects))
+                        /* videoEffects= */ videoEffects))
                 .setDurationUs(presetDurationsUs[i]);
+        videoSequenceDurationUs += presetDurationsUs[i];
         mediaItems.add(itemBuilder.build());
       }
     }
-    EditedMediaItemSequence videoSequence = new EditedMediaItemSequence(mediaItems);
+    EditedMediaItemSequence videoSequence = new EditedMediaItemSequence.Builder(mediaItems).build();
+    List<EditedMediaItemSequence> compositionSequences = new ArrayList<>();
+    compositionSequences.add(videoSequence);
+    if (includeBackgroundAudioTrack) {
+      compositionSequences.add(getAudioBackgroundSequence(Util.usToMs(videoSequenceDurationUs)));
+    }
     SonicAudioProcessor sampleRateChanger = new SonicAudioProcessor();
     sampleRateChanger.setOutputSampleRateHz(8_000);
-    return new Composition.Builder(/* sequences= */ ImmutableList.of(videoSequence))
+    return new Composition.Builder(/* sequences= */ compositionSequences)
         .setEffects(
             new Effects(
                 /* audioProcessors= */ ImmutableList.of(sampleRateChanger),
                 /* videoEffects= */ ImmutableList.of()))
         .build();
+  }
+
+  private EditedMediaItemSequence getAudioBackgroundSequence(long durationMs) {
+    MediaItem audioMediaItem =
+        new MediaItem.Builder()
+            .setUri(AUDIO_URI)
+            .setClippingConfiguration(
+                new MediaItem.ClippingConfiguration.Builder()
+                    .setStartPositionMs(0)
+                    .setEndPositionMs(durationMs)
+                    .build())
+            .build();
+    EditedMediaItem audioItem =
+        new EditedMediaItem.Builder(audioMediaItem).setDurationUs(59_000_000).build();
+    return new EditedMediaItemSequence.Builder(audioItem).build();
   }
 
   private void previewComposition() {
@@ -188,6 +228,7 @@ public final class CompositionPreviewActivity extends AppCompatActivity {
             Log.e(TAG, "Preview error", error);
           }
         });
+    player.setRepeatMode(Player.REPEAT_MODE_ALL);
     player.setComposition(composition);
     player.prepare();
     player.play();

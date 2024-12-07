@@ -53,11 +53,9 @@ import android.os.SystemClock;
 import android.view.KeyEvent;
 import android.view.ViewConfiguration;
 import androidx.annotation.CheckResult;
-import androidx.annotation.DoNotInline;
 import androidx.annotation.FloatRange;
 import androidx.annotation.GuardedBy;
 import androidx.annotation.Nullable;
-import androidx.annotation.RequiresApi;
 import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.DeviceInfo;
 import androidx.media3.common.MediaItem;
@@ -1213,7 +1211,7 @@ import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
     }
     // Double tap detection.
     int keyCode = keyEvent.getKeyCode();
-    boolean isTvApp = Util.SDK_INT >= 21 && Api21.isTvApp(context);
+    boolean isTvApp = context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_LEANBACK);
     boolean doubleTapCompleted = false;
     switch (keyCode) {
       case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
@@ -1242,7 +1240,8 @@ import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
     }
 
     if (!isMediaNotificationControllerConnected()) {
-      if (keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE && doubleTapCompleted) {
+      if ((keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || keyCode == KeyEvent.KEYCODE_HEADSETHOOK)
+          && doubleTapCompleted) {
         // Double tap completion for legacy when media notification controller is disabled.
         sessionLegacyStub.onSkipToNext();
         return true;
@@ -1262,7 +1261,7 @@ import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
     ControllerInfo controllerInfo = checkNotNull(instance.getMediaNotificationControllerInfo());
     Runnable command;
     int keyCode = keyEvent.getKeyCode();
-    if ((keyCode == KEYCODE_MEDIA_PLAY_PAUSE || keyCode == KEYCODE_MEDIA_PLAY)
+    if ((keyCode == KEYCODE_MEDIA_PLAY_PAUSE || keyCode == KeyEvent.KEYCODE_HEADSETHOOK)
         && doubleTapCompleted) {
       keyCode = KEYCODE_MEDIA_NEXT;
     }
@@ -1907,14 +1906,6 @@ import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
       if (!hasMessages(MSG_PLAYER_INFO_CHANGED)) {
         sendEmptyMessage(MSG_PLAYER_INFO_CHANGED);
       }
-    }
-  }
-
-  @RequiresApi(21)
-  private static final class Api21 {
-    @DoNotInline
-    public static boolean isTvApp(Context context) {
-      return context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_LEANBACK);
     }
   }
 }

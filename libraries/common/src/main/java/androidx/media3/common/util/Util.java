@@ -16,6 +16,11 @@
 package androidx.media3.common.util;
 
 import static android.content.Context.UI_MODE_SERVICE;
+import static androidx.media3.common.C.AUXILIARY_TRACK_TYPE_DEPTH_INVERSE;
+import static androidx.media3.common.C.AUXILIARY_TRACK_TYPE_DEPTH_LINEAR;
+import static androidx.media3.common.C.AUXILIARY_TRACK_TYPE_DEPTH_METADATA;
+import static androidx.media3.common.C.AUXILIARY_TRACK_TYPE_ORIGINAL;
+import static androidx.media3.common.C.AUXILIARY_TRACK_TYPE_UNDEFINED;
 import static androidx.media3.common.Player.COMMAND_PLAY_PAUSE;
 import static androidx.media3.common.Player.COMMAND_PREPARE;
 import static androidx.media3.common.Player.COMMAND_SEEK_BACK;
@@ -74,8 +79,8 @@ import android.util.SparseLongArray;
 import android.view.Display;
 import android.view.SurfaceView;
 import android.view.WindowManager;
+
 import androidx.annotation.ChecksSdkIntAtLeast;
-import androidx.annotation.DoNotInline;
 import androidx.annotation.DrawableRes;
 import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
@@ -90,8 +95,8 @@ import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.common.Player.Commands;
 import androidx.media3.common.audio.AudioProcessor;
+
 import com.google.common.base.Ascii;
-import com.google.common.base.Charsets;
 import com.google.common.io.ByteStreams;
 import com.google.common.math.DoubleMath;
 import com.google.common.math.LongMath;
@@ -102,6 +107,7 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.SettableFuture;
+import com.google.errorprone.annotations.InlineMe;
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.File;
@@ -112,6 +118,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -475,16 +482,15 @@ public final class Util {
   }
 
   /**
-   * Tests two objects for {@link Object#equals(Object)} equality, handling the case where one or
-   * both may be {@code null}.
-   *
-   * @param o1 The first object.
-   * @param o2 The second object.
-   * @return {@code o1 == null ? o2 == null : o1.equals(o2)}.
+   * @deprecated Use {@link Objects#equals(Object, Object)} instead.
    */
   @UnstableApi
+  @Deprecated
+  @InlineMe(
+      replacement = "Objects.equals(o1, o2)",
+      imports = {"java.util.Objects"})
   public static boolean areEqual(@Nullable Object o1, @Nullable Object o2) {
-    return o1 == null ? o2 == null : o1.equals(o2);
+    return Objects.equals(o1, o2);
   }
 
   /**
@@ -962,16 +968,14 @@ public final class Util {
   /**
    * Returns the language tag for a {@link Locale}.
    *
-   * <p>For API levels &ge; 21, this tag is IETF BCP 47 compliant. Use {@link
-   * #normalizeLanguageCode(String)} to retrieve a normalized IETF BCP 47 language tag for all API
-   * levels if needed.
+   * <p>This tag is IETF BCP 47 compliant.
    *
    * @param locale A {@link Locale}.
    * @return The language tag.
    */
   @UnstableApi
   public static String getLocaleLanguageTag(Locale locale) {
-    return SDK_INT >= 21 ? getLocaleLanguageTagV21(locale) : locale.toString();
+    return locale.toLanguageTag();
   }
 
   /**
@@ -1043,7 +1047,7 @@ public final class Util {
    */
   @UnstableApi
   public static String fromUtf8Bytes(byte[] bytes) {
-    return new String(bytes, Charsets.UTF_8);
+    return new String(bytes, StandardCharsets.UTF_8);
   }
 
   /**
@@ -1056,7 +1060,7 @@ public final class Util {
    */
   @UnstableApi
   public static String fromUtf8Bytes(byte[] bytes, int offset, int length) {
-    return new String(bytes, offset, length, Charsets.UTF_8);
+    return new String(bytes, offset, length, StandardCharsets.UTF_8);
   }
 
   /**
@@ -1067,7 +1071,7 @@ public final class Util {
    */
   @UnstableApi
   public static byte[] getUtf8Bytes(String value) {
-    return value.getBytes(Charsets.UTF_8);
+    return value.getBytes(StandardCharsets.UTF_8);
   }
 
   /**
@@ -2237,13 +2241,13 @@ public final class Util {
       case 8:
         return AudioFormat.CHANNEL_OUT_7POINT1_SURROUND;
       case 10:
-        if (Util.SDK_INT >= 32) {
+       if (Util.SDK_INT >= 32) {
           return AudioFormat.CHANNEL_OUT_5POINT1POINT4;
-        } else {
+       } else {
           // Before API 32, height channel masks are not available. For those 10-channel streams
           // supported on the audio output devices (e.g. DTS:X P2), we use 7.1-surround instead.
-          return AudioFormat.CHANNEL_OUT_5POINT1;
-        }
+         return AudioFormat.CHANNEL_OUT_5POINT1;
+       }
       case 12:
         return AudioFormat.CHANNEL_OUT_7POINT1POINT4;
       default:
@@ -2253,7 +2257,6 @@ public final class Util {
 
   /** Creates {@link AudioFormat} with given sampleRate, channelConfig, and encoding. */
   @UnstableApi
-  @RequiresApi(21)
   public static AudioFormat getAudioFormat(int sampleRate, int channelConfig, int encoding) {
     return new AudioFormat.Builder()
         .setSampleRate(sampleRate)
@@ -2313,19 +2316,30 @@ public final class Util {
    */
   @UnstableApi
   public static int getPcmFrameSize(@C.PcmEncoding int pcmEncoding, int channelCount) {
+    return getByteDepth(pcmEncoding) * channelCount;
+  }
+
+  /**
+   * Returns the byte depth for audio with the specified encoding.
+   *
+   * @param pcmEncoding The encoding of the audio data.
+   * @return The byte depth of the audio.
+   */
+  @UnstableApi
+  public static int getByteDepth(@C.PcmEncoding int pcmEncoding) {
     switch (pcmEncoding) {
       case C.ENCODING_PCM_8BIT:
-        return channelCount;
+        return 1;
       case C.ENCODING_PCM_16BIT:
       case C.ENCODING_PCM_16BIT_BIG_ENDIAN:
-        return channelCount * 2;
+        return 2;
       case C.ENCODING_PCM_24BIT:
       case C.ENCODING_PCM_24BIT_BIG_ENDIAN:
-        return channelCount * 3;
+        return 3;
       case C.ENCODING_PCM_32BIT:
       case C.ENCODING_PCM_32BIT_BIG_ENDIAN:
       case C.ENCODING_PCM_FLOAT:
-        return channelCount * 4;
+        return 4;
       case C.ENCODING_INVALID:
       case Format.NO_VALUE:
       default:
@@ -2417,7 +2431,6 @@ public final class Util {
    * @see AudioManager#generateAudioSessionId()
    */
   @UnstableApi
-  @RequiresApi(21)
   public static int generateAudioSessionIdV21(Context context) {
     @Nullable
     AudioManager audioManager = ((AudioManager) context.getSystemService(Context.AUDIO_SERVICE));
@@ -3065,8 +3078,7 @@ public final class Util {
    */
   @UnstableApi
   public static boolean isWear(Context context) {
-    return SDK_INT >= 20
-        && context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_WATCH);
+    return context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_WATCH);
   }
 
   /**
@@ -3294,7 +3306,30 @@ public final class Util {
     if ((roleFlags & C.ROLE_FLAG_TRICK_PLAY) != 0) {
       result.add("trick-play");
     }
+    if ((roleFlags & C.ROLE_FLAG_AUXILIARY) != 0) {
+      result.add("auxiliary");
+    }
     return result;
+  }
+
+  /** Returns a string representation of the {@link C.AuxiliaryTrackType}. */
+  @UnstableApi
+  public static String getAuxiliaryTrackTypeString(@C.AuxiliaryTrackType int auxiliaryTrackType) {
+    // LINT.IfChange(auxiliary_track_type)
+    switch (auxiliaryTrackType) {
+      case AUXILIARY_TRACK_TYPE_UNDEFINED:
+        return "undefined";
+      case AUXILIARY_TRACK_TYPE_ORIGINAL:
+        return "original";
+      case AUXILIARY_TRACK_TYPE_DEPTH_LINEAR:
+        return "depth-linear";
+      case AUXILIARY_TRACK_TYPE_DEPTH_INVERSE:
+        return "depth-inverse";
+      case AUXILIARY_TRACK_TYPE_DEPTH_METADATA:
+        return "depth metadata";
+      default:
+        throw new IllegalStateException("Unsupported auxiliary track type");
+    }
   }
 
   /**
@@ -3373,13 +3408,14 @@ public final class Util {
     // bounds. From API 29, if the app targets API 29 or later, the {@link
     // MediaFormat#KEY_ALLOW_FRAME_DROP} key prevents frame dropping even when the surface is
     // full.
-    // Some API 30 devices might drop frames despite setting {@link
-    // MediaFormat#KEY_ALLOW_FRAME_DROP} to 0. See b/307518793 and b/289983935.
+    // Some devices might drop frames despite setting {@link
+    // MediaFormat#KEY_ALLOW_FRAME_DROP} to 0. See b/307518793, b/289983935 and b/353487886.
     return SDK_INT < 29
         || context.getApplicationInfo().targetSdkVersion < 29
-        || (SDK_INT == 30
-            && (Ascii.equalsIgnoreCase(MODEL, "moto g(20)")
-                || Ascii.equalsIgnoreCase(MODEL, "rmx3231")));
+        || ((SDK_INT == 30
+                && (Ascii.equalsIgnoreCase(MODEL, "moto g(20)")
+                    || Ascii.equalsIgnoreCase(MODEL, "rmx3231")))
+            || (SDK_INT == 34 && Ascii.equalsIgnoreCase(MODEL, "sm-x200")));
   }
 
   /**
@@ -3499,9 +3535,7 @@ public final class Util {
   @UnstableApi
   public static Drawable getDrawable(
       Context context, Resources resources, @DrawableRes int drawableRes) {
-    return SDK_INT >= 21
-        ? Api21.getDrawable(context, resources, drawableRes)
-        : resources.getDrawable(drawableRes);
+    return resources.getDrawable(drawableRes, context.getTheme());
   }
 
   /**
@@ -3661,11 +3695,6 @@ public final class Util {
   @RequiresApi(24)
   private static String[] getSystemLocalesV24(Configuration config) {
     return split(config.getLocales().toLanguageTags(), ",");
-  }
-
-  @RequiresApi(21)
-  private static String getLocaleLanguageTagV21(Locale locale) {
-    return locale.toLanguageTag();
   }
 
   private static HashMap<String, String> createIsoLanguageReplacementMap() {
@@ -3887,18 +3916,9 @@ public final class Util {
     0xF3
   };
 
-  @RequiresApi(21)
-  private static final class Api21 {
-    @DoNotInline
-    public static Drawable getDrawable(Context context, Resources resources, @DrawableRes int res) {
-      return resources.getDrawable(res, context.getTheme());
-    }
-  }
-
   @RequiresApi(29)
   private static class Api29 {
 
-    @DoNotInline
     public static void startForeground(
         Service mediaSessionService,
         int notificationId,
