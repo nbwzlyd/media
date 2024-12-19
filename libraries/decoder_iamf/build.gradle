@@ -23,6 +23,38 @@ android {
         }
         androidTest.assets.srcDir '../test_data/src/test/assets'
     }
+
+    defaultConfig {
+        externalNativeBuild {
+            cmake {
+                targets "iamfJNI"
+            }
+        }
+    }
+
+    // TODO(Internal: b/372449691): Remove packagingOptions once AGP is updated
+    // to version 8.5.1 or higher.
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }
+}
+
+// Configure the native build only if libiamf is present to avoid gradle sync
+// failures if libiamf hasn't been built according to the README instructions.
+if (project.file('src/main/jni/libiamf').exists()) {
+    android.externalNativeBuild.cmake {
+        path = 'src/main/jni/CMakeLists.txt'
+        version = '3.21.0+'
+        if (project.hasProperty('externalNativeBuildDir')) {
+            if (!new File(externalNativeBuildDir).isAbsolute()) {
+                ext.externalNativeBuildDir =
+                        new File(rootDir, it.externalNativeBuildDir)
+            }
+            buildStagingDirectory = "${externalNativeBuildDir}/${project.name}"
+        }
+    }
 }
 
 dependencies {

@@ -84,10 +84,8 @@ import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.audio.SilenceSkippingAudioProcessor;
 import androidx.media3.exoplayer.util.DebugTextViewHelper;
-import androidx.media3.muxer.Muxer;
 import androidx.media3.transformer.Composition;
 import androidx.media3.transformer.DefaultEncoderFactory;
-import androidx.media3.transformer.DefaultMuxer;
 import androidx.media3.transformer.EditedMediaItem;
 import androidx.media3.transformer.EditedMediaItemSequence;
 import androidx.media3.transformer.Effects;
@@ -121,6 +119,8 @@ import org.json.JSONObject;
 /** An {@link Activity} that exports and plays media using {@link Transformer}. */
 public final class TransformerActivity extends AppCompatActivity {
   private static final String TAG = "TransformerActivity";
+  private static final int IMAGE_DURATION_MS = 5_000;
+  private static final int IMAGE_FRAME_RATE_FPS = 30;
   private static int LOAD_CONTROL_MIN_BUFFER_MS = 5_000;
   private static int LOAD_CONTROL_MAX_BUFFER_MS = 5_000;
 
@@ -267,7 +267,8 @@ public final class TransformerActivity extends AppCompatActivity {
   }
 
   private MediaItem createMediaItem(@Nullable Bundle bundle, Uri uri) {
-    MediaItem.Builder mediaItemBuilder = new MediaItem.Builder().setUri(uri);
+    MediaItem.Builder mediaItemBuilder =
+        new MediaItem.Builder().setUri(uri).setImageDurationMs(IMAGE_DURATION_MS);
     if (bundle != null) {
       long trimStartMs =
           bundle.getLong(ConfigurationActivity.TRIM_START_MS, /* defaultValue= */ C.TIME_UNSET);
@@ -322,14 +323,13 @@ public final class TransformerActivity extends AppCompatActivity {
         transformerBuilder.setMaxDelayBetweenMuxerSamplesMs(C.TIME_UNSET);
       }
 
-      Muxer.Factory muxerFactory = new DefaultMuxer.Factory();
       if (bundle.getBoolean(ConfigurationActivity.USE_MEDIA3_MUXER)) {
-        muxerFactory = new InAppMuxer.Factory.Builder().build();
+        transformerBuilder.setMuxerFactory(
+            new InAppMuxer.Factory.Builder()
+                .setOutputFragmentedMp4(
+                    bundle.getBoolean(ConfigurationActivity.PRODUCE_FRAGMENTED_MP4))
+                .build());
       }
-      if (bundle.getBoolean(ConfigurationActivity.PRODUCE_FRAGMENTED_MP4)) {
-        muxerFactory = new InAppMuxer.Factory.Builder().setOutputFragmentedMp4(true).build();
-      }
-      transformerBuilder.setMuxerFactory(muxerFactory);
 
       if (bundle.getBoolean(ConfigurationActivity.ENABLE_DEBUG_PREVIEW)) {
         transformerBuilder.setDebugViewProvider(new DemoDebugViewProvider());
@@ -359,7 +359,7 @@ public final class TransformerActivity extends AppCompatActivity {
   private Composition createComposition(MediaItem mediaItem, @Nullable Bundle bundle) {
     EditedMediaItem.Builder editedMediaItemBuilder = new EditedMediaItem.Builder(mediaItem);
     // For image inputs. Automatically ignored if input is audio/video.
-    editedMediaItemBuilder.setDurationUs(5_000_000).setFrameRate(30);
+    editedMediaItemBuilder.setFrameRate(IMAGE_FRAME_RATE_FPS);
     if (bundle != null) {
       ImmutableList<AudioProcessor> audioProcessors = createAudioProcessorsFromBundle(bundle);
       ImmutableList<Effect> videoEffects = createVideoEffectsFromBundle(bundle);

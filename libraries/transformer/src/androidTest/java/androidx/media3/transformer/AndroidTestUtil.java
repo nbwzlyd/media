@@ -34,6 +34,7 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Bitmap.Config;
 import android.media.Image;
+import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
 import android.opengl.EGLContext;
 import android.opengl.EGLDisplay;
@@ -221,6 +222,18 @@ public final class AndroidTestUtil {
                   .setWidth(3072)
                   .setHeight(4080)
                   .build())
+          .build();
+  public static final AssetInfo JPG_PIXEL_MOTION_PHOTO_ASSET =
+      new AssetInfo.Builder("asset:///media/jpeg/pixel-motion-photo-2-hevc-tracks.jpg")
+          .setVideoFormat(
+              new Format.Builder()
+                  .setSampleMimeType(VIDEO_H265)
+                  .setWidth(1024)
+                  .setHeight(768)
+                  .setFrameRate(27.61f)
+                  .setCodecs("hvc1.1.6.L153")
+                  .build())
+          .setVideoFrameCount(58)
           .build();
 
   public static final AssetInfo WEBP_LARGE =
@@ -967,6 +980,35 @@ public final class AndroidTestUtil {
   public static final AssetInfo WAV_ASSET =
       new AssetInfo.Builder("asset:///media/wav/sample.wav").build();
 
+  /** A {@link GlEffect} that adds delay in the video pipeline by putting the thread to sleep. */
+  public static final class DelayEffect implements GlEffect {
+    private final long delayMs;
+
+    public DelayEffect(long delayMs) {
+      this.delayMs = delayMs;
+    }
+
+    @Override
+    public GlShaderProgram toGlShaderProgram(Context context, boolean useHdr) {
+      return new PassthroughShaderProgram() {
+        @Override
+        public void queueInputFrame(
+            GlObjectsProvider glObjectsProvider,
+            GlTextureInfo inputTexture,
+            long presentationTimeUs) {
+          try {
+            Thread.sleep(delayMs);
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            onError(e);
+            return;
+          }
+          super.queueInputFrame(glObjectsProvider, inputTexture, presentationTimeUs);
+        }
+      };
+    }
+  }
+
   /**
    * Creates the GL objects needed to set up a GL environment including an {@link EGLDisplay} and an
    * {@link EGLContext}.
@@ -1215,6 +1257,28 @@ public final class AndroidTestUtil {
     throw new AssumptionViolatedException(skipReason);
   }
 
+  /**
+   * Assumes that the device supports encoding with the given MIME type and profile.
+   *
+   * @param mimeType The {@linkplain MimeTypes MIME type}.
+   * @param profile The {@linkplain MediaCodecInfo.CodecProfileLevel codec profile}.
+   * @throws AssumptionViolatedException If the device does have required encoder or profile.
+   */
+  public static void assumeCanEncodeWithProfile(String mimeType, int profile) {
+    ImmutableList<MediaCodecInfo> supportedEncoders = EncoderUtil.getSupportedEncoders(mimeType);
+    if (supportedEncoders.isEmpty()) {
+      throw new AssumptionViolatedException("No supported encoders");
+    }
+
+    for (int i = 0; i < supportedEncoders.size(); i++) {
+      if (EncoderUtil.findSupportedEncodingProfiles(supportedEncoders.get(i), mimeType)
+          .contains(profile)) {
+        return;
+      }
+    }
+    throw new AssumptionViolatedException("Profile not supported");
+  }
+
   /** Returns a {@link Muxer.Factory} depending upon the API level. */
   public static Muxer.Factory getMuxerFactoryBasedOnApi() {
     // MediaMuxer supports B-frame from API > 24.
@@ -1259,8 +1323,15 @@ public final class AndroidTestUtil {
     }
 
     android.media.MediaCodecInfo encoder = supportedEncoders.get(0);
-    boolean sizeSupported =
-        EncoderUtil.isSizeSupported(encoder, mimeType, format.width, format.height);
+    // VideoSampleExporter rotates videos into landscape before encoding.
+    // Check if the encoder supports the video dimensions after rotating to landscape.
+    int width = format.width;
+    int height = format.height;
+    if (width < height) {
+      width = format.height;
+      height = format.width;
+    }
+    boolean sizeSupported = EncoderUtil.isSizeSupported(encoder, mimeType, width, height);
     boolean bitrateSupported =
         format.averageBitrate == Format.NO_VALUE
             || EncoderUtil.getSupportedBitrateRange(encoder, mimeType)

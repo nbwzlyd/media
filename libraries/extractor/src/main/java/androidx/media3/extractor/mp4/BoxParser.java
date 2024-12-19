@@ -717,22 +717,39 @@ public final class BoxParser {
             Util.scaleLargeTimestamp(
                 track.editListDurations[i], track.timescale, track.movieTimescale);
         // The timestamps array is in the order read from the media, which might not be strictly
-        // sorted, but will ensure that a) all sync frames are in-order and b) any out-of-order
-        // frames are after their respective sync frames. This means that although the result of
-        // this binary search might be slightly incorrect (due to out-of-order timestamps), the loop
-        // below that walks backward to find the previous sync frame will result in a correct start
-        // index.
+        // sorted. However, all sync frames are guaranteed to be in order, and any out-of-order
+        // frames appear after their respective sync frames. This ensures that although the result
+        // of the binary search might not be entirely accurate (due to the out-of-order timestamps),
+        // the following logic ensures correctness for both start and end indices.
+        //
+        // The startIndices calculation finds the largest timestamp that is less than or equal to
+        // editMediaTime. It then walks backward to ensure the index points to a sync frame, since
+        // decoding must start from a keyframe.
         startIndices[i] =
             Util.binarySearchFloor(
                 timestamps, editMediaTime, /* inclusive= */ true, /* stayInBounds= */ true);
+        while (startIndices[i] >= 0 && (flags[startIndices[i]] & C.BUFFER_FLAG_KEY_FRAME) == 0) {
+          startIndices[i]--;
+        }
+        // The endIndices calculation finds the smallest timestamp that is greater than
+        // editMediaTime + editDuration, except when omitZeroDurationClippedSample is true, in which
+        // case it finds the smallest timestamp that is greater than or equal to editMediaTime +
+        // editDuration.
         endIndices[i] =
             Util.binarySearchCeil(
                 timestamps,
                 editMediaTime + editDuration,
                 /* inclusive= */ omitZeroDurationClippedSample,
                 /* stayInBounds= */ false);
-        while (startIndices[i] >= 0 && (flags[startIndices[i]] & C.BUFFER_FLAG_KEY_FRAME) == 0) {
-          startIndices[i]--;
+        if (track.type == C.TRACK_TYPE_VIDEO) {
+          // To account for out-of-order video frames that may have timestamps smaller than or equal
+          // to editMediaTime + editDuration, but still fall within the valid range, the loop walks
+          // forward through the timestamps array to ensure all frames with timestamps within the
+          // edit duration are included.
+          while (endIndices[i] < timestamps.length - 1
+              && timestamps[endIndices[i] + 1] <= (editMediaTime + editDuration)) {
+            endIndices[i]++;
+          }
         }
         editedSampleCount += endIndices[i] - startIndices[i];
         copyMetadata |= nextSampleIndex != startIndices[i];
@@ -941,14 +958,28 @@ public final class BoxParser {
     int version = parseFullBoxVersion(fullAtom);
     mdhd.skipBytes(version == 0 ? 8 : 16);
     long timescale = mdhd.readUnsignedInt();
-    long mediaDuration = version == 0 ? mdhd.readUnsignedInt() : mdhd.readUnsignedLongToLong();
+    boolean mediaDurationUnknown = true;
+    int mediaDurationPosition = mdhd.getPosition();
+    int mediaDurationByteCount = version == 0 ? 4 : 8;
+    for (int i = 0; i < mediaDurationByteCount; i++) {
+      if (mdhd.getData()[mediaDurationPosition + i] != -1) {
+        mediaDurationUnknown = false;
+        break;
+      }
+    }
     long mediaDurationUs;
-    if (mediaDuration == 0) {
-      // 0 duration normally indicates that the file is fully fragmented (i.e. all of the media
-      // samples are in fragments). Treat as unknown.
+    if (mediaDurationUnknown) {
+      mdhd.skipBytes(mediaDurationByteCount);
       mediaDurationUs = C.TIME_UNSET;
     } else {
-      mediaDurationUs = Util.scaleLargeTimestamp(mediaDuration, C.MICROS_PER_SECOND, timescale);
+      long mediaDuration = version == 0 ? mdhd.readUnsignedInt() : mdhd.readUnsignedLongToLong();
+      if (mediaDuration == 0) {
+        // 0 duration normally indicates that the file is fully fragmented (i.e. all of the media
+        // samples are in fragments). Treat as unknown.
+        mediaDurationUs = C.TIME_UNSET;
+      } else {
+        mediaDurationUs = Util.scaleLargeTimestamp(mediaDuration, C.MICROS_PER_SECOND, timescale);
+      }
     }
     int languageCode = mdhd.readUnsignedShort();
     String language =
@@ -1768,6 +1799,14 @@ public final class BoxParser {
     } else {
       // Unsupported version.
       return;
+    }
+
+    // As per the IAMF spec (https://aomediacodec.github.io/iamf/#iasampleentry-section),
+    // channelCount and sampleRate SHALL be set to 0 and ignored. We ignore it by using
+    // Format.NO_VALUE instead of 0.
+    if (atomType == Mp4Box.TYPE_iamf) {
+      channelCount = Format.NO_VALUE;
+      sampleRate = Format.NO_VALUE;
     }
 
     int childPosition = parent.getPosition();

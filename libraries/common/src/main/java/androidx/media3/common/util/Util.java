@@ -1602,7 +1602,7 @@ public final class Util {
    */
   @UnstableApi
   public static long sampleCountToDurationUs(long sampleCount, int sampleRate) {
-    return scaleLargeValue(sampleCount, C.MICROS_PER_SECOND, sampleRate, RoundingMode.FLOOR);
+    return scaleLargeValue(sampleCount, C.MICROS_PER_SECOND, sampleRate, RoundingMode.DOWN);
   }
 
   /**
@@ -1619,7 +1619,7 @@ public final class Util {
    */
   @UnstableApi
   public static long durationUsToSampleCount(long durationUs, int sampleRate) {
-    return scaleLargeValue(durationUs, sampleRate, C.MICROS_PER_SECOND, RoundingMode.CEILING);
+    return scaleLargeValue(durationUs, sampleRate, C.MICROS_PER_SECOND, RoundingMode.UP);
   }
 
   /**
@@ -1904,16 +1904,18 @@ public final class Util {
    * Scales a large timestamp.
    *
    * <p>Equivalent to {@link #scaleLargeValue(long, long, long, RoundingMode)} with {@link
-   * RoundingMode#FLOOR}.
+   * RoundingMode#DOWN}.
    *
    * @param timestamp The timestamp to scale.
    * @param multiplier The multiplier.
    * @param divisor The divisor.
    * @return The scaled timestamp.
    */
+  // TODO: b/372204124 - Consider switching this (and impls below) to HALF_UP rounding to reduce
+  //   round-trip errors when switching between time bases with different resolutions.
   @UnstableApi
   public static long scaleLargeTimestamp(long timestamp, long multiplier, long divisor) {
-    return scaleLargeValue(timestamp, multiplier, divisor, RoundingMode.FLOOR);
+    return scaleLargeValue(timestamp, multiplier, divisor, RoundingMode.DOWN);
   }
 
   /**
@@ -1926,7 +1928,7 @@ public final class Util {
    */
   @UnstableApi
   public static long[] scaleLargeTimestamps(List<Long> timestamps, long multiplier, long divisor) {
-    return scaleLargeValues(timestamps, multiplier, divisor, RoundingMode.FLOOR);
+    return scaleLargeValues(timestamps, multiplier, divisor, RoundingMode.DOWN);
   }
 
   /**
@@ -1938,7 +1940,7 @@ public final class Util {
    */
   @UnstableApi
   public static void scaleLargeTimestampsInPlace(long[] timestamps, long multiplier, long divisor) {
-    scaleLargeValuesInPlace(timestamps, multiplier, divisor, RoundingMode.FLOOR);
+    scaleLargeValuesInPlace(timestamps, multiplier, divisor, RoundingMode.DOWN);
   }
 
   /**
@@ -2250,6 +2252,24 @@ public final class Util {
        }
       case 12:
         return AudioFormat.CHANNEL_OUT_7POINT1POINT4;
+      case 24:
+        if (Util.SDK_INT >= 32) {
+          return AudioFormat.CHANNEL_OUT_7POINT1POINT4
+              | AudioFormat.CHANNEL_OUT_FRONT_LEFT_OF_CENTER
+              | AudioFormat.CHANNEL_OUT_FRONT_RIGHT_OF_CENTER
+              | AudioFormat.CHANNEL_OUT_BACK_CENTER
+              | AudioFormat.CHANNEL_OUT_TOP_CENTER
+              | AudioFormat.CHANNEL_OUT_TOP_FRONT_CENTER
+              | AudioFormat.CHANNEL_OUT_TOP_BACK_CENTER
+              | AudioFormat.CHANNEL_OUT_TOP_SIDE_LEFT
+              | AudioFormat.CHANNEL_OUT_TOP_SIDE_RIGHT
+              | AudioFormat.CHANNEL_OUT_BOTTOM_FRONT_LEFT
+              | AudioFormat.CHANNEL_OUT_BOTTOM_FRONT_RIGHT
+              | AudioFormat.CHANNEL_OUT_BOTTOM_FRONT_CENTER
+              | AudioFormat.CHANNEL_OUT_LOW_FREQUENCY_2;
+        } else {
+          return AudioFormat.CHANNEL_INVALID;
+        }
       default:
         return AudioFormat.CHANNEL_INVALID;
     }

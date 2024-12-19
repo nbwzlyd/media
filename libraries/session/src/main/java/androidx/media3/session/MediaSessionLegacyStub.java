@@ -134,7 +134,8 @@ import org.checkerframework.checker.initialization.qual.Initialized;
   private int sessionFlags;
 
   @SuppressWarnings("PendingIntentMutability") // We can't use SaferPendingIntent
-  public MediaSessionLegacyStub(MediaSessionImpl session, Uri sessionUri, Handler handler) {
+  public MediaSessionLegacyStub(
+      MediaSessionImpl session, Uri sessionUri, Handler handler, Bundle tokenExtras) {
     sessionImpl = session;
     Context context = sessionImpl.getContext();
     sessionManager = MediaSessionManager.getSessionManager(context);
@@ -204,7 +205,7 @@ import org.checkerframework.checker.initialization.qual.Initialized;
             sessionCompatId,
             Util.SDK_INT < 31 ? receiverComponentName : null,
             Util.SDK_INT < 31 ? mediaButtonIntent : null,
-            session.getToken().getExtras());
+            /* sessionInfo= */ tokenExtras);
     if (Util.SDK_INT >= 31 && broadcastReceiverComponentName != null) {
       Api31.setMediaButtonBroadcastReceiver(sessionCompat, broadcastReceiverComponentName);
     }
@@ -279,8 +280,11 @@ import org.checkerframework.checker.initialization.qual.Initialized;
   @Override
   public void onCommand(String commandName, @Nullable Bundle args, @Nullable ResultReceiver cb) {
     checkStateNotNull(commandName);
-    if (TextUtils.equals(MediaConstants.SESSION_COMMAND_REQUEST_SESSION3_TOKEN, commandName)
-        && cb != null) {
+    if (commandName.equals(MediaConstants.SESSION_COMMAND_MEDIA3_PLAY_REQUEST)) {
+      // Ignore, no need to handle this command here.
+      return;
+    }
+    if (commandName.equals(MediaConstants.SESSION_COMMAND_REQUEST_SESSION3_TOKEN) && cb != null) {
       cb.send(RESULT_SUCCESS, sessionImpl.getToken().toBundle());
       return;
     }
@@ -319,7 +323,8 @@ import org.checkerframework.checker.initialization.qual.Initialized;
             ControllerInfo.LEGACY_CONTROLLER_INTERFACE_VERSION,
             /* trusted= */ false,
             /* cb= */ null,
-            /* connectionHints= */ Bundle.EMPTY),
+            /* connectionHints= */ Bundle.EMPTY,
+            /* maxCommandsForMediaItems= */ 0),
         intent);
   }
 
@@ -781,7 +786,8 @@ import org.checkerframework.checker.initialization.qual.Initialized;
               ControllerInfo.LEGACY_CONTROLLER_INTERFACE_VERSION,
               sessionManager.isTrustedForMediaControl(remoteUserInfo),
               controllerCb,
-              /* connectionHints= */ Bundle.EMPTY);
+              /* connectionHints= */ Bundle.EMPTY,
+              /* maxCommandsForMediaItems= */ 0);
       MediaSession.ConnectionResult connectionResult = sessionImpl.onConnectOnHandler(controller);
       if (!connectionResult.isAccepted) {
         try {
@@ -1106,6 +1112,11 @@ import org.checkerframework.checker.initialization.qual.Initialized;
 
     @Override
     public void setCustomLayout(int seq, List<CommandButton> layout) {
+      updateLegacySessionPlaybackState(sessionImpl.getPlayerWrapper());
+    }
+
+    @Override
+    public void setMediaButtonPreferences(int seq, List<CommandButton> mediaButtonPreferences) {
       updateLegacySessionPlaybackState(sessionImpl.getPlayerWrapper());
     }
 

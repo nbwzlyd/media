@@ -37,7 +37,6 @@ import androidx.media3.extractor.SeekMap;
 import androidx.media3.extractor.SeekMap.SeekPoints;
 import androidx.media3.extractor.SeekPoint;
 import androidx.media3.extractor.TrackOutput;
-import androidx.media3.test.utils.AssetContentProvider;
 import androidx.media3.test.utils.TestUtil;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -567,8 +566,7 @@ public class MediaExtractorCompatTest {
   public void setDataSourceUsingMethodExpectingContentUri_useContentUri_setsTrackCountCorrectly()
       throws IOException {
     Context context = ApplicationProvider.getApplicationContext();
-    Uri contentUri =
-        AssetContentProvider.buildUri(/* filePath= */ "media/mp4/sample.mp4", /* pipeMode= */ true);
+    Uri contentUri = Uri.parse("asset:///media/mp4/sample.mp4");
     MediaExtractorCompat mediaExtractorCompat = new MediaExtractorCompat(context);
 
     mediaExtractorCompat.setDataSource(context, contentUri, /* headers= */ null);
@@ -643,7 +641,7 @@ public class MediaExtractorCompatTest {
    * Read action to verify that {@link MediaExtractorCompat} does not read more data than expected.
    */
   private static int assertionFailureReadAction(ExtractorInput input, PositionHolder holder) {
-    throw new AssertionError("ExoPlayerBackedMediaExtractorProxy read more data than needed.");
+    throw new AssertionError("MediaExtractorCompat read more data than needed.");
   }
 
   // Internal classes.

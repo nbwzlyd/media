@@ -21,7 +21,9 @@ import static androidx.media3.common.util.Assertions.checkState;
 import static androidx.media3.muxer.ColorUtils.MEDIAFORMAT_STANDARD_TO_PRIMARIES_AND_MATRIX;
 import static androidx.media3.muxer.ColorUtils.MEDIAFORMAT_TRANSFER_TO_MP4_TRANSFER;
 import static androidx.media3.muxer.MuxerUtil.UNSIGNED_INT_MAX_VALUE;
+import static java.lang.Math.abs;
 import static java.lang.Math.max;
+import static java.lang.Math.min;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
 import android.media.MediaCodec;
@@ -44,6 +46,7 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.primitives.Bytes;
 import com.google.common.primitives.Ints;
+import java.math.RoundingMode;
 import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -117,7 +120,6 @@ import org.checkerframework.checker.nullness.qual.PolyNull;
   public static ByteBuffer moov(
       List<Track> tracks,
       MetadataCollector metadataCollector,
-      long minInputPtsUs,
       boolean isFragmentedMp4,
       @Mp4Muxer.LastSampleDurationBehavior int lastSampleDurationBehavior) {
     // The timestamp will always fit into a 32-bit integer. This is already validated in the
@@ -126,6 +128,15 @@ import org.checkerframework.checker.nullness.qual.PolyNull;
     int creationTimestampSeconds = (int) metadataCollector.timestampData.creationTimestampSeconds;
     int modificationTimestampSeconds =
         (int) metadataCollector.timestampData.modificationTimestampSeconds;
+    long minInputPtsUs = findMinimumPresentationTimestampUsAcrossTracks(tracks);
+
+    // For a non fragmented MP4 file, avoid writing an empty moov box.
+    // For a fragmented MP4 file, the minInputPtsUs gets ignored as the moov box is written without
+    // any sample info.
+    if (!isFragmentedMp4 && minInputPtsUs == C.TIME_UNSET) {
+      return ByteBuffer.allocate(0);
+    }
+
     List<ByteBuffer> trakBoxes = new ArrayList<>();
     List<ByteBuffer> trexBoxes = new ArrayList<>();
 
@@ -133,6 +144,7 @@ import org.checkerframework.checker.nullness.qual.PolyNull;
     long videoDurationUs = 0L;
     for (int i = 0; i < tracks.size(); i++) {
       Track track = tracks.get(i);
+      // For a non fragmented MP4 file, avoid writing an empty track.
       if (!isFragmentedMp4 && track.writtenSamples.isEmpty()) {
         continue;
       }
@@ -143,7 +155,6 @@ import org.checkerframework.checker.nullness.qual.PolyNull;
       List<Integer> sampleDurationsVu =
           convertPresentationTimestampsToDurationsVu(
               track.writtenSamples,
-              minInputPtsUs,
               track.videoUnitTimebase(),
               lastSampleDurationBehavior,
               track.endOfStreamTimestampUs);
@@ -153,6 +164,8 @@ import org.checkerframework.checker.nullness.qual.PolyNull;
         trackDurationInTrackUnitsVu += sampleDurationsVu.get(j);
       }
 
+      long firstInputPtsUs =
+          track.writtenSamples.isEmpty() ? 0 : track.writtenSamples.get(0).presentationTimeUs;
       long trackDurationUs = usFromVu(trackDurationInTrackUnitsVu, track.videoUnitTimebase());
 
       @C.TrackType int trackType = MimeTypes.getTrackType(format.sampleMimeType);
@@ -213,6 +226,12 @@ import org.checkerframework.checker.nullness.qual.PolyNull;
                   modificationTimestampSeconds,
                   metadataCollector.orientationData.orientation,
                   format),
+              edts(
+                  firstInputPtsUs,
+                  minInputPtsUs,
+                  trackDurationUs,
+                  MVHD_TIMEBASE,
+                  track.videoUnitTimebase()),
               mdia(
                   mdhd(
                       trackDurationInTrackUnitsVu,
@@ -761,19 +780,77 @@ import org.checkerframework.checker.nullness.qual.PolyNull;
     return BoxUtils.wrapIntoBox(fourcc, contents);
   }
 
+  /** Returns the edts (edit) box. */
+  public static ByteBuffer edts(
+      long firstInputPtsUs,
+      long minInputPtsUs,
+      long trackDurationUs,
+      long mvhdTimescale,
+      long trackTimescale) {
+    // If the minInputPtsUs is positive, then subtract it from all tracks. This ensures that at
+    // least one track starts at zero, with others starting relative to that.
+    if (minInputPtsUs > 0) {
+      firstInputPtsUs -= minInputPtsUs;
+    }
+    // Return an empty box if the first presentation timestamp is 0.
+    return firstInputPtsUs != 0
+        ? BoxUtils.wrapIntoBox(
+            "edts", elst(firstInputPtsUs, trackDurationUs, mvhdTimescale, trackTimescale))
+        : ByteBuffer.allocate(0);
+  }
+
+  /** Returns an elst (edit list) entry. */
+  private static ByteBuffer elstEntry(
+      long editDurationVu, long mediaTimeVu, int mediaRateInt, int mediaRateFraction) {
+    ByteBuffer contents = ByteBuffer.allocate(20);
+    contents.putLong(editDurationVu);
+    contents.putLong(mediaTimeVu);
+    contents.putShort((short) mediaRateInt);
+    contents.putShort((short) mediaRateFraction);
+    contents.flip();
+    return contents;
+  }
+
+  /** Returns the elst (edit list) box. */
+  private static ByteBuffer elst(
+      long firstSamplePtsUs, long trackDurationUs, long mvhdTimescale, long trackTimescale) {
+    ByteBuffer elstContent = ByteBuffer.allocate(50);
+    int versionAndFlags = 1 << 24; // version (value 1, 8 bits) + flag (value 0, 24 bits)
+    elstContent.putInt(versionAndFlags);
+    if (firstSamplePtsUs > 0) {
+      elstContent.putInt(2); // Entry count
+      // Add an empty list to represent starting offset of a track.
+      elstContent.put(
+          elstEntry(
+              /* editDurationVu= */ vuFromUs(firstSamplePtsUs, mvhdTimescale),
+              /* mediaTimeVu= */ -1,
+              /* mediaRateInt= */ 1,
+              /* mediaRateFraction= */ 0));
+      elstContent.put(
+          elstEntry(
+              /* editDurationVu= */ vuFromUs(trackDurationUs, mvhdTimescale),
+              /* mediaTimeVu= */ 0,
+              /* mediaRateInt= */ 1,
+              /* mediaRateFraction= */ 0));
+    } else {
+      // Indicates that the samples with the negative timestamps should not be rendered.
+      elstContent.putInt(1); // Entry count
+      elstContent.put(
+          elstEntry(
+              /* editDurationVu= */ vuFromUs(
+                  trackDurationUs - abs(firstSamplePtsUs), mvhdTimescale),
+              /* mediaTimeVu= */ vuFromUs(abs(firstSamplePtsUs), trackTimescale),
+              /* mediaRateInt= */ 1,
+              /* mediaRateFraction= */ 0));
+    }
+    elstContent.flip();
+    return BoxUtils.wrapIntoBox("elst", elstContent);
+  }
+
   /**
    * Converts sample presentation times (in microseconds) to sample durations (in timebase units).
    *
-   * <p>All the tracks must start from the same time. If all the tracks do not start from the same
-   * time, then the caller must pass the minimum presentation timestamp across all tracks to be set
-   * for the first sample. As a result, the duration of that first sample may be larger.
-   *
    * @param samplesInfo A list of {@linkplain BufferInfo sample info}.
-   * @param firstSamplePresentationTimeUs The presentation timestamp to override the first sample's
-   *     presentation timestamp, in microseconds. This should be the minimum presentation timestamp
-   *     across all tracks if the {@code samplesInfo} contains the first sample of the track.
-   *     Otherwise this should be equal to the presentation timestamp of first sample present in the
-   *     {@code samplesInfo} list.
    * @param videoUnitTimescale The timescale of the track.
    * @param lastSampleDurationBehavior The behaviour for the last sample duration.
    * @param endOfStreamTimestampUs The timestamp (in microseconds) of the end of stream sample.
@@ -781,7 +858,6 @@ import org.checkerframework.checker.nullness.qual.PolyNull;
    */
   public static List<Integer> convertPresentationTimestampsToDurationsVu(
       List<BufferInfo> samplesInfo,
-      long firstSamplePresentationTimeUs,
       int videoUnitTimescale,
       @Mp4Muxer.LastSampleDurationBehavior int lastSampleDurationBehavior,
       long endOfStreamTimestampUs) {
@@ -807,14 +883,11 @@ import org.checkerframework.checker.nullness.qual.PolyNull;
       Collections.sort(presentationTimestampsUs);
     }
 
-    long currentSampleTimeUs = firstSamplePresentationTimeUs;
+    long currentSampleTimeUs = presentationTimestampsUs.get(0);
     for (int nextSampleId = 1; nextSampleId < presentationTimestampsUs.size(); nextSampleId++) {
       long nextSampleTimeUs = presentationTimestampsUs.get(nextSampleId);
-      // TODO: b/316158030 - First calculate the duration and then convert us to vu to avoid
-      //  rounding error.
       long currentSampleDurationVu =
-          vuFromUs(nextSampleTimeUs, videoUnitTimescale)
-              - vuFromUs(currentSampleTimeUs, videoUnitTimescale);
+          vuFromUs(nextSampleTimeUs - currentSampleTimeUs, videoUnitTimescale);
       checkState(
           currentSampleDurationVu <= Integer.MAX_VALUE, "Only 32-bit sample duration is allowed");
       durationsVu.add((int) currentSampleDurationVu);
@@ -890,7 +963,8 @@ import org.checkerframework.checker.nullness.qual.PolyNull;
         ByteBuffer.allocate(
             2 * BYTES_PER_INTEGER + 2 * compositionOffsets.size() * BYTES_PER_INTEGER);
 
-    contents.putInt(1); // version and flags.
+    int versionAndFlags = 1 << 24; // version (value 1, 8 bits) + flag (value 0, 24 bits)
+    contents.putInt(versionAndFlags);
 
     // Total entry count is known only after processing all the composition offsets, so put in
     // a placeholder for total entry count and store its index.
@@ -1235,7 +1309,9 @@ import org.checkerframework.checker.nullness.qual.PolyNull;
 
   /** Converts video units to microseconds, using the provided timebase. */
   private static long usFromVu(long timestampVu, long videoUnitTimebase) {
-    return timestampVu * 1_000_000L / videoUnitTimebase;
+    // TODO: b/372204124 - Switch to scaleLargeTimestamp when it uses HALF_UP rounding.
+    return Util.scaleLargeValue(
+        timestampVu, C.MICROS_PER_SECOND, videoUnitTimebase, RoundingMode.HALF_UP);
   }
 
   /** Returns the duration of the last sample (in video units). */
@@ -1454,8 +1530,11 @@ import org.checkerframework.checker.nullness.qual.PolyNull;
     ByteBuffer contents = ByteBuffer.allocate(MAX_FIXED_LEAF_BOX_SIZE);
 
     contents.putInt(versionAndFlags);
-    // Default value of videoRange is 0.
-    int videoRange = format.colorInfo != null ? format.colorInfo.colorRange : 0;
+    // Default value of videoRange is limited range (value 0).
+    int videoRange =
+        format.colorInfo != null && format.colorInfo.colorRange != Format.NO_VALUE
+            ? format.colorInfo.colorRange
+            : 0;
     ByteBuffer codecPrivateContent = parseVp9CodecPrivateFromCsd(csd0, videoRange);
     contents.put(codecPrivateContent);
 
@@ -1466,10 +1545,16 @@ import org.checkerframework.checker.nullness.qual.PolyNull;
     int matrixCoefficients = 1;
 
     if (format.colorInfo != null) {
-      colourPrimaries = MEDIAFORMAT_STANDARD_TO_PRIMARIES_AND_MATRIX.get(videoRange).get(0);
-      transferCharacteristics =
-          MEDIAFORMAT_TRANSFER_TO_MP4_TRANSFER.get(format.colorInfo.colorTransfer);
-      matrixCoefficients = MEDIAFORMAT_STANDARD_TO_PRIMARIES_AND_MATRIX.get(videoRange).get(1);
+      ColorInfo colorInfo = format.colorInfo;
+      if (colorInfo.colorSpace != Format.NO_VALUE) {
+        colourPrimaries =
+            MEDIAFORMAT_STANDARD_TO_PRIMARIES_AND_MATRIX.get(colorInfo.colorSpace).get(0);
+        matrixCoefficients =
+            MEDIAFORMAT_STANDARD_TO_PRIMARIES_AND_MATRIX.get(colorInfo.colorSpace).get(1);
+      }
+      if (colorInfo.colorTransfer != Format.NO_VALUE) {
+        transferCharacteristics = MEDIAFORMAT_TRANSFER_TO_MP4_TRANSFER.get(colorInfo.colorTransfer);
+      }
     }
 
     contents.put((byte) colourPrimaries);
@@ -1778,16 +1863,21 @@ import org.checkerframework.checker.nullness.qual.PolyNull;
     return BoxUtils.wrapIntoBox("dOps", contents);
   }
 
-  /** Packs a three-letter language code into a short, packing 3x5 bits. */
+  /**
+   * Packs a three-letter language code into a short, packing 3x5 bits.
+   *
+   * <p>A default value 0 is returned if the {@code code} is not recognized.
+   */
   private static short languageCodeFromString(@Nullable String code) {
+    short defaultLanguageCode = 0;
     if (code == null) {
-      return 0;
+      return defaultLanguageCode;
     }
 
     byte[] bytes = Util.getUtf8Bytes(code);
 
     if (bytes.length != 3) {
-      throw new IllegalArgumentException("Non-length-3 language code: " + code);
+      return defaultLanguageCode;
     }
 
     // Take only last 5 bits of each letter.
@@ -1828,6 +1918,19 @@ import org.checkerframework.checker.nullness.qual.PolyNull;
 
   /** Converts microseconds to video units, using the provided timebase. */
   private static long vuFromUs(long timestampUs, long videoUnitTimebase) {
-    return timestampUs * videoUnitTimebase / 1_000_000L; // Division for microsecond to second.
+    // TODO: b/372204124 - Switch to scaleLargeTimestamp when it uses HALF_UP rounding.
+    return Util.scaleLargeValue(
+        timestampUs, videoUnitTimebase, C.MICROS_PER_SECOND, RoundingMode.HALF_UP);
+  }
+
+  private static long findMinimumPresentationTimestampUsAcrossTracks(List<Track> tracks) {
+    long minInputPtsUs = Long.MAX_VALUE;
+    for (int i = 0; i < tracks.size(); i++) {
+      Track track = tracks.get(i);
+      if (!track.writtenSamples.isEmpty()) {
+        minInputPtsUs = min(track.writtenSamples.get(0).presentationTimeUs, minInputPtsUs);
+      }
+    }
+    return minInputPtsUs != Long.MAX_VALUE ? minInputPtsUs : C.TIME_UNSET;
   }
 }

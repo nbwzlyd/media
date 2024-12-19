@@ -142,6 +142,26 @@ public final class MediaItemExportTest {
   }
 
   @Test
+  public void start_gapOnlyExport_outputsSilence() throws Exception {
+    CapturingMuxer.Factory muxerFactory = new CapturingMuxer.Factory(/* handleAudioAsPcm= */ true);
+    Transformer transformer =
+        createTransformerBuilder(muxerFactory, /* enableFallback= */ false).build();
+
+    EditedMediaItemSequence gapSequence =
+        new EditedMediaItemSequence.Builder().addGap(500_000).build();
+
+    transformer.start(new Composition.Builder(gapSequence).build(), outputDir.newFile().getPath());
+    ExportResult result = TransformerTestRunner.runLooper(transformer);
+
+    // TODO(b/355201372) - Assert 500ms duration.
+    assertThat(result.durationMs).isAtLeast(487);
+    assertThat(result.durationMs).isAtMost(500);
+
+    DumpFileAsserts.assertOutput(
+        context, muxerFactory.getCreatedMuxer(), getDumpFileName("gap", "500ms"));
+  }
+
+  @Test
   public void start_audioAndVideoPassthrough_withClippingStartAtKeyFrame_completesSuccessfully()
       throws Exception {
     CapturingMuxer.Factory muxerFactory = new CapturingMuxer.Factory(/* handleAudioAsPcm= */ false);
@@ -574,6 +594,36 @@ public final class MediaItemExportTest {
         context,
         muxerFactory.getCreatedMuxer(),
         getDumpFileName(/* originalFileName= */ FILE_AUDIO_RAW, /* modifications...= */ "48000hz"));
+  }
+
+  @Test
+  public void adjustAudioSpeed_toDoubleSpeed_returnsExpectedNumberOfSamples() throws Exception {
+    CapturingMuxer.Factory muxerFactory = new CapturingMuxer.Factory(/* handleAudioAsPcm= */ true);
+    SonicAudioProcessor sonicAudioProcessor = new SonicAudioProcessor();
+    sonicAudioProcessor.setSpeed(2f);
+    Transformer transformer =
+        createTransformerBuilder(muxerFactory, /* enableFallback= */ false).build();
+    MediaItem mediaItem = MediaItem.fromUri(ASSET_URI_PREFIX + FILE_AUDIO_RAW);
+    AtomicInteger bytesRead = new AtomicInteger();
+
+    EditedMediaItem editedMediaItem =
+        new EditedMediaItem.Builder(mediaItem)
+            .setEffects(
+                createAudioEffects(
+                    sonicAudioProcessor, createByteCountingAudioProcessor(bytesRead)))
+            .build();
+
+    transformer.start(editedMediaItem, outputDir.newFile().getPath());
+    TransformerTestRunner.runLooper(transformer);
+
+    // Time stretching 1 second @ 44100Hz into 22050 samples.
+    assertThat(bytesRead.get() / 2).isEqualTo(22050);
+
+    DumpFileAsserts.assertOutput(
+        context,
+        muxerFactory.getCreatedMuxer(),
+        getDumpFileName(
+            /* originalFileName= */ FILE_AUDIO_RAW, /* modifications...= */ "doubleSpeed"));
   }
 
   @Test
@@ -1027,7 +1077,7 @@ public final class MediaItemExportTest {
     MediaSource.Factory mediaSourceFactory =
         new DefaultMediaSourceFactory(
             context, new SlowExtractorsFactory(/* delayBetweenReadsMs= */ 10));
-    Codec.DecoderFactory decoderFactory = new DefaultDecoderFactory(context);
+    Codec.DecoderFactory decoderFactory = new DefaultDecoderFactory.Builder(context).build();
     AssetLoader.Factory assetLoaderFactory =
         new ExoPlayerAssetLoader.Factory(
             context,
