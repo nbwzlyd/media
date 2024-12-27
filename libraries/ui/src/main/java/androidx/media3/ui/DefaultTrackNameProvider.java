@@ -27,7 +27,6 @@ import androidx.media3.common.util.Util;
 import java.util.Locale;
 
 /** A default {@link TrackNameProvider}. */
-@UnstableApi
 public class DefaultTrackNameProvider implements TrackNameProvider {
 
   private final Resources resources;
