@@ -157,6 +157,7 @@ public final class TsExtractor implements Extractor {
   private static final long E_AC3_FORMAT_IDENTIFIER = 0x45414333;
   private static final long AC4_FORMAT_IDENTIFIER = 0x41432d34;
   private static final long HEVC_FORMAT_IDENTIFIER = 0x48455643;
+  private static final long AV3A_FORMAT_IDENTIFIER = 0x61763361;
 
   private static final int BUFFER_SIZE = TS_PACKET_SIZE * 50;
   private static final int SNIFF_TS_PACKET_COUNT = 5;
@@ -354,6 +355,7 @@ public final class TsExtractor implements Extractor {
 
   @Override
   public boolean sniff(ExtractorInput input) throws IOException {
+    skip(input);
     byte[] buffer = tsPacketBuffer.getData();
     input.peekFully(buffer, 0, TS_PACKET_SIZE * SNIFF_TS_PACKET_COUNT);
     int of = 0;
@@ -385,6 +387,18 @@ public final class TsExtractor implements Extractor {
     }
     return false;
   }
+
+    private void skip(ExtractorInput input) throws IOException {
+        int limit = TS_PACKET_SIZE * 5;
+        byte[] buffer = tsPacketBuffer.getData();
+        input.peekFully(buffer, 0, limit);
+        for (int i = 0; i < limit; i++) {
+            if (buffer[i] == TS_SYNC_BYTE && buffer[i + TS_PACKET_SIZE] == TS_SYNC_BYTE) {
+                if (i > 0) input.skipFully(i);
+                break;
+            }
+        }
+    }
 
   @Override
   public void init(ExtractorOutput output) {
